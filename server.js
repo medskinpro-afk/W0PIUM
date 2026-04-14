@@ -19,10 +19,22 @@ const archiver = require('archiver');
 const sharp = require('sharp');
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+// ── STARTUP SECRETS CHECK ──
+// Fail immediately in production if critical secrets are missing.
+if (IS_PROD) {
+  const missing = ['ENCRYPTION_KEY', 'MASTER_CODE', 'VAPID_PUBLIC', 'VAPID_PRIVATE']
+    .filter(k => !process.env[k]);
+  if (missing.length) {
+    logger.error({ missing }, 'FATAL: required env vars not set — refusing to start');
+    process.exit(1);
+  }
+}
 
 // ── EMAIL ENCRYPTION (AES-256-GCM) ──
-// Key must be 32 bytes. If ENCRYPTION_KEY is set in .env, use it; otherwise derive from a fallback.
-// In production, always set ENCRYPTION_KEY to a random 64-hex-char string.
+// Key must be 32 bytes. In production ENCRYPTION_KEY is required (checked above).
+// In development a deterministic fallback is used for convenience only.
 const ENC_KEY = process.env.ENCRYPTION_KEY
   ? Buffer.from(process.env.ENCRYPTION_KEY, 'hex')
   : crypto.scryptSync('w0pium-dev-key', 'salt', 32);
@@ -95,9 +107,13 @@ const INVITE_ONLY = process.env.INVITE_ONLY === '1';
 const MASTER_CODE = (process.env.MASTER_CODE || 'W0PIUM').toUpperCase();
 const RESEND_KEY  = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM  = process.env.EMAIL_FROM || 'onboarding@resend.dev';
-const VAPID_PUBLIC  = process.env.VAPID_PUBLIC  || 'BEEYUfWYI53T9X5epBb03KM40XtfZeA5248EX2MyWfCXYLXkmU41bI02A2Ou9OLecU3bYRE_SXNwyFhkuUIQnLo';
-const VAPID_PRIVATE = process.env.VAPID_PRIVATE || 'pjgVwsgzznayrsSqZsTQFrhxaNhP75Nf2ADYxMAkWK4';
-webpush.setVapidDetails('mailto:noreply@w0pium.app', VAPID_PUBLIC, VAPID_PRIVATE);
+const VAPID_PUBLIC  = process.env.VAPID_PUBLIC  || '';
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE || '';
+// Only initialise web-push when both keys are present — push notifications
+// are silently disabled otherwise (safe in dev, blocked by startup check in prod).
+if (VAPID_PUBLIC && VAPID_PRIVATE) {
+  webpush.setVapidDetails('mailto:noreply@w0pium.app', VAPID_PUBLIC, VAPID_PRIVATE);
+}
 
 // ── SSRF GUARD ──────────────────────────────────────────────────────────────
 // Reject private/loopback addresses to prevent server-side request forgery
