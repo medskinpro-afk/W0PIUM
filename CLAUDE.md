@@ -119,18 +119,26 @@ All design tokens live in `:root {}` in `style.css`.
 ## Database Patterns
 
 ```js
-// Helpers (synchronous — sql.js is sync)
-run(sql, params)   // INSERT / UPDATE / DELETE — auto-debounced save
+// Helpers (synchronous — better-sqlite3 is sync)
+run(sql, params)   // INSERT / UPDATE / DELETE
 get(sql, params)   // SELECT → single row object or null
 all(sql, params)   // SELECT → array of row objects
 
 // Schema migrations — add to alterStatements array, never edit CREATE TABLE
 [
   'ALTER TABLE users ADD COLUMN new_col TEXT DEFAULT ""',
-].forEach(s => { try { db.run(s); } catch {} });
+].forEach(s => { try { db.exec(s); } catch {} });
 ```
 
 **Never edit existing `CREATE TABLE` statements** to add columns — always use `alterStatements`. This ensures existing DBs migrate safely on startup.
+
+**CRITICAL — String literals in SQL:** Always use single quotes. Double quotes are treated as column identifiers in this SQLite version (causes `SqliteError: no such column`):
+```js
+// ✅ correct
+get("SELECT * FROM posts WHERE content='' AND created_at > datetime('now','-1 day')", [])
+// ❌ breaks at runtime
+get('SELECT * FROM posts WHERE content="" AND created_at > datetime("now")', [])
+```
 
 ## Adding a New Feature
 
@@ -161,6 +169,18 @@ all(sql, params)   // SELECT → array of row objects
 - Security headers: `helmet()` applied globally
 - Banned users: kicked from sessions immediately on ban, blocked by `auth` middleware
 - Global error handler suppresses stack traces in production
+
+**CRITICAL — Helmet CSP:** `helmet()` adds `script-src-attr 'none'` by default in v7+, which silently blocks all `onclick="..."` attribute handlers (they become `null`). Always include `scriptSrcAttr: ["'unsafe-inline'"]` in the CSP directives:
+```js
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      scriptSrcAttr: ["'unsafe-inline'"],
+      // ... other directives
+    }
+  }
+}));
+```
 
 ## CSS Conventions
 
