@@ -2447,7 +2447,7 @@ function main() {
 
   app.use('/disk', auth, express.static(DISK_DIR));
 
-  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'csp-onclick-fix' }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'security-audit-fixes' }));
 
   app.get('*', (req,res) => res.sendFile(p.join(__dirname,'public','index.html')));
   // Global error handler — never expose stack traces to clients
