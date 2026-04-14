@@ -546,13 +546,13 @@ function main() {
     const u = get('SELECT avatar FROM users WHERE id=?', [uid]);
     if (u?.avatar) try { fs.unlinkSync(p.join(DATA, u.avatar.replace(/^\//, ''))); } catch {}
     // Post images
-    all('SELECT image FROM posts WHERE user_id=? AND image IS NOT NULL AND image != ""', [uid])
+    all("SELECT image FROM posts WHERE user_id=? AND image IS NOT NULL AND image != ''", [uid])
       .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch {} });
     // Message file attachments
-    all('SELECT file FROM messages WHERE sender_id=? AND file IS NOT NULL AND file != ""', [uid])
+    all("SELECT file FROM messages WHERE sender_id=? AND file IS NOT NULL AND file != ''", [uid])
       .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.file.replace(/^\//, ''))); } catch {} });
     // Drop images
-    all('SELECT image FROM drops WHERE user_id=? AND image IS NOT NULL AND image != ""', [uid])
+    all("SELECT image FROM drops WHERE user_id=? AND image IS NOT NULL AND image != ''", [uid])
       .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch {} });
   }
 
