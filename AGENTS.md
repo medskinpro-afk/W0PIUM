@@ -241,11 +241,35 @@ git config --global --add safe.directory "//MedSkin/docker/w0pium"
 
 ### Требует настройки в `.env`
 - **Email** (`RESEND_API_KEY`) — верификация и сброс пароля не работают без ключа
-- **Push** (`VAPID_PUBLIC`, `VAPID_PRIVATE`) — Web Push не работает без ключей
+- **Push** (`VAPID_PUBLIC`, `VAPID_PRIVATE`) — Web Push не работает без ключей; **в production сервер не запустится** если ключи не заданы (fail-close)
 - Сгенерировать VAPID: `node -e "const wp=require('web-push');const k=wp.generateVAPIDKeys();console.log(k)"`
+- **Cloudflare Tunnel** (`CLOUDFLARE_TUNNEL_TOKEN`) — токен туннеля; в `docker-compose.yml` используется через `${CLOUDFLARE_TUNNEL_TOKEN}`
 
 ### В разработке / частично реализовано
 - **Hub / федерация** — страница есть, логика распределённых узлов не завершена
+
+---
+
+### 5. Fail-close: сервер не стартует без обязательных секретов (production)
+
+**Поведение:** При `NODE_ENV=production` сервер проверяет наличие `ENCRYPTION_KEY`, `MASTER_CODE`, `VAPID_PUBLIC`, `VAPID_PRIVATE`. Если хотя бы одна не задана — `process.exit(1)` при старте.
+
+**Это намеренно** — не пытайся убрать или обойти проверку. Если сервер падает при старте, проверь `.env`.
+
+---
+
+### 6. isSsrfBlocked() — асинхронная функция (await обязателен)
+
+**Проблема:** После добавления DNS-резолвинга `isSsrfBlocked()` стала async. Вызов без `await` вернёт `Promise<boolean>` вместо `boolean` — SSRF-защита будет broken.
+
+**Правило:** всегда `await isSsrfBlocked(url)`:
+```js
+// ✅ правильно
+if (await isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
+
+// ❌ сломает защиту (Promise всегда truthy)
+if (isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
+```
 
 ---
 
