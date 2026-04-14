@@ -5,7 +5,7 @@
 | Layer      | Tech                                      |
 |------------|-------------------------------------------|
 | Runtime    | Node.js 20+ / Express 4                   |
-| Database   | sql.js (SQLite compiled to WASM, in-memory + file persistence) |
+| Database   | better-sqlite3 (native SQLite, synchronous, file-based) |
 | Frontend   | Vanilla JS SPA — no React, no TypeScript  |
 | CSS        | Custom CSS vars + Tailwind utilities (via Vite/PostCSS) |
 | Build tool | Vite 5 (dev server + CSS pipeline only)   |
@@ -104,8 +104,11 @@ Key functions: `startRecording(cid)`, `stopRecordingPreview()`, `cancelRecording
 
 ## Theme System
 
-Dark-only. No light mode, no theme toggle, no `.light` class.
-All design tokens live in `:root {}` in `style.css`.
+Dark (default) + Light mode. Toggle via nav → theme button; persisted in `localStorage`.
+- Dark: `:root {}` in `style.css`
+- Light: `:root.light {}` overrides in `style.css`
+- `applyTheme(theme)` and `toggleTheme()` in `app.js` toggle `.light` on `<html>`
+All design tokens live in `:root {}` in `style.css`; light overrides use same variable names.
 
 ## PWA
 
@@ -119,7 +122,7 @@ All design tokens live in `:root {}` in `style.css`.
 ## Database Patterns
 
 ```js
-// Helpers (synchronous — better-sqlite3 is sync)
+// Helpers defined at top of server.js (before main())
 run(sql, params)   // INSERT / UPDATE / DELETE
 get(sql, params)   // SELECT → single row object or null
 all(sql, params)   // SELECT → array of row objects
@@ -199,4 +202,4 @@ app.use(helmet({
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
 
-Verbs: `add`, `fix`, `update`, `remove`, `refactor`
+Prefixes: `feat`, `fix`, `refactor`, `style`, `docs`, `chore`
