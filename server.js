@@ -116,12 +116,22 @@ if (VAPID_PUBLIC && VAPID_PRIVATE) {
 }
 
 // ── SSRF GUARD ──────────────────────────────────────────────────────────────
-// Reject private/loopback addresses to prevent server-side request forgery
+// Block private/loopback/link-local IPs to prevent server-side request forgery.
+// Two-stage check:
+//   1. Regex on the raw hostname string (catches localhost, 10.x, 192.168.x etc.)
+//   2. DNS resolution — resolves the hostname to an IP and re-checks the result,
+//      which defeats alternate IP formats (0x7f000001, octal, decimal) and
+//      DNS rebinding attacks where a hostname resolves to a private address.
+const { promises: dns } = require('dns');
 const _ssrfBlockedRe = /^(127\.|0\.0\.0\.0|localhost|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|::1|fc00:|fe80:)/i;
-function isSsrfBlocked(rawUrl) {
+async function isSsrfBlocked(rawUrl) {
   try {
-    const { hostname } = new URL(rawUrl);
-    return _ssrfBlockedRe.test(hostname);
+    const { hostname, protocol } = new URL(rawUrl);
+    if (!['http:', 'https:'].includes(protocol)) return true;
+    if (_ssrfBlockedRe.test(hostname)) return true;
+    // Resolve to IP and re-check — catches non-standard formats and DNS rebinding
+    const { address } = await dns.lookup(hostname, { verbatim: false });
+    return _ssrfBlockedRe.test(address);
   } catch { return true; }
 }
 
@@ -1353,7 +1363,7 @@ function main() {
   app.get('/api/link-preview', auth, limiterLinkPreview, async (req, res) => {
     const url = (req.query.url || '').trim();
     if (!url || !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Invalid URL' });
-    if (isSsrfBlocked(url)) return res.status(400).json({ error: 'Invalid URL' });
+    if (await isSsrfBlocked(url)) return res.status(400).json({ error: 'Invalid URL' });
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 5000);
