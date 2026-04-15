@@ -9,12 +9,14 @@ ROOT_DIR="$(CDPATH= cd -- "$_SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
 # ── Smoke tests (optional) ──────────────────────────────────────────────────
+# Run only if Playwright package AND its Chromium browser binary are both present.
 PW_BIN="$ROOT_DIR/node_modules/.bin/playwright"
-if [ -x "$PW_BIN" ] && command -v node >/dev/null 2>&1; then
+if [ -x "$PW_BIN" ] && command -v node >/dev/null 2>&1 \
+    && node -e "const{chromium}=require('@playwright/test');require('fs').accessSync(chromium.executablePath())" 2>/dev/null; then
   echo "==> Pre-deploy smoke checks"
   node scripts/run-e2e-all.js
 else
-  echo "==> Smoke skipped (Playwright not installed — run 'npm ci && npx playwright install chromium' to enable)"
+  echo "==> Smoke skipped (Playwright or Chromium not installed — run 'npx playwright install chromium' to enable)"
 fi
 
 # ── Deploy ──────────────────────────────────────────────────────────────────
