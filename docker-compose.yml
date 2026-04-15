@@ -1,3 +1,13 @@
+# w0pium — base compose (production-style)
+#
+# public/ is copied into the image (Dockerfile: COPY public/). This file does NOT
+# bind-mount ./public, because a host mount would hide the image copy and
+# `docker compose up --build` would not ship UI from the build — you would only
+# see whatever was already on disk under ./public.
+#
+# Optional: for local edits to ./public without rebuild, copy
+# docker-compose.override.example.yml to docker-compose.override.yml (gitignored).
+
 version: "3.8"
 
 services:
@@ -8,8 +18,8 @@ services:
     ports:
       - "3000:3000"
     volumes:
+      # Persist DB and user media only (see file header for public/)
       - ./data:/data
-      - ./public:/app/public:ro
     env_file:
       - .env
     environment:

@@ -7,9 +7,25 @@
     "start": "node server.js",
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
+    "lint": "node scripts/run-eslint.js",
     "format": "prettier --write .",
-    "prepare": "husky"
+    "e2e:smoke": "playwright test --config=playwright.config.js --project=chromium",
+    "e2e:smoke:prod": "playwright test --config=playwright.prod.config.js --project=chromium",
+    "e2e:dm": "playwright test tests/e2e/dm.spec.js --config=playwright.config.js --project=chromium",
+    "e2e:dm:prod": "playwright test tests/e2e/dm.spec.js --config=playwright.prod.config.js --project=chromium",
+    "e2e:smoke:all": "node scripts/run-e2e-all.js",
+    "e2e:smoke:all:continue": "node scripts/run-e2e-all.js --continue-on-fail",
+    "deploy:guard": "sh scripts/predeploy-and-deploy.sh",
+    "smoke:nightly": "sh scripts/nightly-prod-smoke.sh",
+    "pipeline:auto": "sh scripts/auto-pipeline.sh",
+    "ops:checklist": "sh scripts/checklist.sh",
+    "ops:status": "sh scripts/status-report.sh",
+    "ops:rollback": "sh scripts/rollback-safe.sh",
+    "e2e:docker:smoke": "sh scripts/e2e-docker.sh smoke",
+    "e2e:docker:smoke:prod": "sh scripts/e2e-docker.sh smoke-prod",
+    "e2e:docker:dm:prod": "sh scripts/e2e-docker.sh dm-prod",
+    "e2e:install": "playwright install chromium",
+    "prepare": "node scripts/prepare-husky.js"
   },
   "dependencies": {
     "archiver": "^7.0.1",
@@ -30,6 +46,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@eslint/js": "^9.13.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.13.0",

@@ -1,0 +1,87 @@
+---
+description: Deployment guide for W0PIUM on Synology NAS via Docker and Cloudflare Tunnel.
+globs: ["Dockerfile", "docker-compose.yml", "docker-compose.override.example.yml", ".env*"]
+alwaysApply: false
+---
+
+# W0PIUM — Deploy Guide
+
+## Infrastructure
+
+- **Host:** Synology NAS, Docker Compose
+- **Tunnel:** Cloudflare Tunnel `w0pium-nas-2` (ID: `275fe0ab-2f80-4335-ace9-d51df0f67448`)
+- **Route:** `w0pium.walfir.com` → `http://w0pium:3000`
+- **Container name:** `w0pium`
+- **Synology repo path:** `/volume1/docker/w0pium/`
+
+## Full Rebuild (dependencies, Dockerfile, or **`public/`** in the image)
+
+DSM Task Scheduler (e.g. **w0PIUM Auto Pipeline**) or manual:
+```bash
+cd /volume1/docker/w0pium
+docker compose up --build -d
+```
+
+**`public/`:** base `docker-compose.yml` does **not** bind-mount `./public` so the image’s `COPY public/` is what runs in production. If you use `docker-compose.override.yml` (from `docker-compose.override.example.yml`), host `./public` overrides the image — see comments in `docker-compose.yml` and `AGENTS.md` (деплой).
+
+## Quick Restart (only server.js changed)
+
+```bash
+docker cp /volume1/docker/w0pium/server.js w0pium:/app/server.js
+docker restart w0pium
+```
+
+## Verify Deploy
+
+```bash
+curl https://w0pium.walfir.com/api/health
+# → {"ok":true,"uptime":...,"build":"<marker>"}
+```
+
+Update the `build` marker in `/api/health` before deploying so you can confirm what's live:
+```js
+app.get('/api/health', (req, res) =>
+  res.json({ ok: true, uptime: process.uptime(), build: 'my-feature-name' })
+);
+```
+
+## Logs
+
+```bash
+docker logs w0pium --tail 100 -f
+# or via DSM Task Scheduler — Task 6 → output.log
+```
+
+## Environment Variables (.env)
+
+| Variable               | Purpose                                      |
+|------------------------|----------------------------------------------|
+| `PORT`                 | 3000                                         |
+| `NODE_ENV`             | production                                   |
+| `DATA_DIR`             | /data                                        |
+| `MASTER_CODE`          | Master invite code (fail-close if missing)   |
+| `ENCRYPTION_KEY`       | 64 hex chars — email token encryption (fail-close if missing) |
+| `RESEND_API_KEY`       | Email delivery via Resend                    |
+| `EMAIL_FROM`           | Sender address                               |
+| `VAPID_PUBLIC`         | Web Push public key (fail-close if missing)  |
+| `VAPID_PRIVATE`        | Web Push private key (fail-close if missing) |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Token for `w0pium-nas-2` tunnel          |
+
+Generate VAPID keys:
+```bash
+node -e "const wp=require('web-push');const k=wp.generateVAPIDKeys();console.log(k)"
+```
+
+**Never commit `.env`. Never edit it without explicit user confirmation.**
+
+## Git Workflow
+
+1. `git status` before any changes
+2. Name the files you're about to change
+3. After changes: `git diff --stat` + short description
+4. One commit per completed task:
+   - `feat:` new feature
+   - `fix:` bug fix
+   - `refactor:` refactoring
+   - `style:` CSS/UI only
+   - `docs:` documentation

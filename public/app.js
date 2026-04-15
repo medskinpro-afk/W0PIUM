@@ -99,6 +99,7 @@ let pageParam = null;
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+const sameId = (a, b) => String(a ?? '') === String(b ?? '');
 // Safe URL helper to prevent javascript: URI injection
 // Accepts only http and https schemes. Returns '#' for invalid or unsafe URLs.
 function safeUrl(u) {
@@ -187,7 +188,7 @@ function initEvents() {
     if (page === 'chat' && currentChatId === data.conv_id) {
       appendMessage(data);
       // Play notification sound for incoming messages
-      if (!document.hidden && data.sender_id !== me?.id) playNotifSound();
+      if (!document.hidden && !sameId(data.sender_id, me?.id)) playNotifSound();
     } else {
       // Update unread badge
       if (me) { me.unread_chats = (me.unread_chats || 0) + 1; renderNav(); }
@@ -209,7 +210,7 @@ function initEvents() {
   });
   eventSrc.addEventListener('typing', e => {
     const data = JSON.parse(e.data);
-    if (page === 'chat' && currentChatId === data.conv_id && data.user_id !== me.id) {
+    if (page === 'chat' && currentChatId === data.conv_id && !sameId(data.user_id, me?.id)) {
       showTyping();
     }
   });
@@ -341,7 +342,14 @@ async function loadChats() {
 function appendMessage(m) {
   const cont = document.getElementById('chatMsgs');
   if (!cont) return;
-  cont.insertAdjacentHTML('beforeend', msgHtml(m));
+  const lastEl = [...cont.querySelectorAll('.msg[data-id]')].pop();
+  const prev = lastEl
+    ? { sender_id: lastEl.dataset.sender, deleted_at: null, created_at: lastEl.dataset.created }
+    : null;
+  if (lastEl && chatDayKey(m.created_at) !== chatDayKey(lastEl.dataset.created)) {
+    cont.insertAdjacentHTML('beforeend', chatDateSeparatorHtml(m.created_at));
+  }
+  cont.insertAdjacentHTML('beforeend', msgHtml(m, prev, null));
   loadLinkPreviews(cont).catch(() => {});
   if (isNearBottom()) {
     scrollChatToBottom();
@@ -384,12 +392,14 @@ function updateMessage(mid, content, edited_at) {
       parts.push(`<div class="msg-file"><a href="${esc(file)}" target="_blank">[${label}]</a></div>`);
     }
   }
-  const editedLabel = timeAgo(edited_at || new Date().toISOString()) + ' (изм.)';
+  const created = el.dataset.created;
+  const timeTitle = timeAgo(edited_at || new Date().toISOString());
+  let timeLabel = formatChatMsgTime(created || edited_at) + ' · изм.';
   if (el.classList.contains('me')) {
     const isRead = chatOtherLastRead && new Date(chatOtherLastRead) >= new Date(el.dataset.created || 0);
-    parts.push(`<div class="msg-time">${editedLabel}<span class="msg-tick${isRead ? ' read' : ''}">${isRead ? '✓✓' : '✓'}</span></div>`);
+    parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}<span class="msg-tick${isRead ? ' read' : ''}">${isRead ? '✓✓' : '✓'}</span></div>`);
   } else {
-    parts.push(`<div class="msg-time">${editedLabel}</div>`);
+    parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}</div>`);
   }
   const existingBar = body.querySelector('.reaction-bar');
   body.innerHTML = parts.join('');
@@ -404,7 +414,7 @@ function removeMessage(mid) {
   if (!el) return;
   const body = el.querySelector('.msg-body');
   if (!body) return;
-  body.innerHTML = `<div class="msg-text" style="font-style:italic;color:var(--fg3)">[удалено]</div>`;
+  body.innerHTML = '<div class="msg-text msg-text--deleted">[удалено]</div>';
 }
 
 function startEditMsg(mid, cid) {
@@ -605,13 +615,6 @@ async function init() {
     s.textContent = `.reaction-btn{background:var(--card-bg,#111);border:1px solid var(--border,#222);border-radius:20px;padding:2px 8px;cursor:pointer;font-size:14px;color:inherit;display:inline-flex;align-items:center;gap:4px}.reaction-btn.me{border-color:var(--accent,#7c3aed);background:var(--accent-dim,#1e1033)}.reaction-add-btn-post{background:none;border:1px solid var(--border,#222);border-radius:20px;padding:2px 8px;cursor:pointer;color:var(--muted,#888);font-size:14px}.post-reactions-bar{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;align-items:center}`;
     document.head.appendChild(s);
   }
-  // inject messenger improvements styles
-  if (!document.getElementById('msg-imp-styles')) {
-    const s = document.createElement('style');
-    s.id = 'msg-imp-styles';
-    s.textContent = `.unread-divider{text-align:center;margin:12px 0;position:relative}.unread-divider::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:var(--accent,#7c3aed);opacity:0.4}.unread-divider span{position:relative;background:var(--bg,#050505);padding:0 8px;font-size:11px;color:var(--accent,#7c3aed)}.pinned-msg-bar{padding:6px 12px;background:var(--card-bg,#111);border-bottom:1px solid var(--border,#222);cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--fg2,#aaa)}.pinned-msg-bar:hover{background:var(--bg2,#0a0a0a)}.msg-forwarded{font-size:11px;color:var(--muted,#666);margin-bottom:2px}.voice-player{display:flex;align-items:center;gap:6px;padding:4px 0}.vp-play-btn{background:var(--accent,#7c3aed);border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center}.vp-wave{border-radius:4px;background:var(--bg2,#0a0a0a)}.vp-dur{font-size:12px;color:var(--muted,#666);min-width:32px}.chat-draft-note{font-size:11px;color:var(--muted,#666);margin-left:4px}.msg-highlight{animation:msgFlash 1.8s ease}@keyframes msgFlash{0%,100%{background:transparent}25%,75%{background:var(--accent-dim,rgba(124,58,237,0.15))}}.online-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0}.chat-lastseen{font-size:11px;color:var(--muted,#666);line-height:1.2}.media-gallery-modal{width:min(500px,95vw)}.gallery-tab{background:none;border:1px solid var(--border,#222);border-radius:4px;padding:3px 10px;cursor:pointer;color:var(--fg2);font-size:13px}.gallery-tab.active{background:var(--accent,#7c3aed);border-color:var(--accent,#7c3aed);color:#fff}.vp-speed-btn{background:none;border:1px solid var(--border,#222);border-radius:4px;padding:1px 5px;cursor:pointer;color:var(--muted,#666);font-size:11px;min-width:24px}`;
-    document.head.appendChild(s);
-  }
   try { me = await api('/me'); if (me) csrfToken = me.csrf_token || ''; } catch { me = null; }
   const vEl = document.getElementById('appVersion');
   if (vEl) vEl.textContent = APP_VERSION;
@@ -620,6 +623,7 @@ async function init() {
   let _startPage, _startParam = null;
   if (_pn.startsWith('/profile/')) { _startPage = 'profile'; _startParam = _pn.slice(9); }
   else if (_pn.startsWith('/chat/')) { _startPage = 'chat'; _startParam = _pn.slice(6); }
+  else if (_pn.startsWith('/hashtag/')) { _startPage = 'hashtag'; _startParam = decodeURIComponent(_pn.slice(9)); }
   else {
     const _pm = { '/disk':'disk','/drops':'drops','/discover':'discover','/artists':'artists',
       '/settings':'settings','/notifs':'notifs','/chats':'chats','/admin':'admin','/hub':'hub','/search':'search' };
@@ -634,6 +638,7 @@ async function init() {
     const _pp = window.location.pathname;
     if (_pp.startsWith('/profile/')) go('profile', _pp.slice(9), 'none');
     else if (_pp.startsWith('/chat/')) go('chat', _pp.slice(6), 'none');
+    else if (_pp.startsWith('/hashtag/')) go('hashtag', decodeURIComponent(_pp.slice(9)), 'none');
     else {
       const _m2 = { '/disk':'disk','/drops':'drops','/discover':'discover','/artists':'artists',
         '/settings':'settings','/notifs':'notifs','/chats':'chats','/admin':'admin','/hub':'hub' };
@@ -687,7 +692,7 @@ function renderNav() {
   const html = items.map(i =>
     i.sep
       ? `<div class="nav-sep"></div>`
-      : `<span class="${[page === i.id && !i.action ? 'active' : ''].filter(Boolean).join(' ')}" title="${i.title || ''}" onclick="${i.action || `go('${i.id}'${i.param ? `,'${i.param}'` : ''})`}">${i.label}</span>`
+      : `<span role="button" tabindex="0" class="nav-item ${[page === i.id && !i.action ? 'active' : ''].filter(Boolean).join(' ')}" title="${i.title || ''}" onclick="${i.action || `go('${i.id}'${i.param ? `,'${i.param}'` : ''})`}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">${i.label}</span>`
   ).join('');
   el.innerHTML = html;
   mob.innerHTML = html;
@@ -725,14 +730,11 @@ function go(p, param, _hist = 'push') {
   }
   if (p !== 'chat') {
     chatOtherLastRead = null; vrWantPreview = false;
+    window._currentChatConv = null;
     document.body.classList.remove('in-chat');
     if (window._vpCleanup) { window._vpCleanup(); window._vpCleanup = null; }
     // Clean up user info panel and its close handler
-    document.getElementById('userInfoPanel')?.remove();
-    if (window._uipCloseHandler) {
-      document.removeEventListener('click', window._uipCloseHandler);
-      window._uipCloseHandler = null;
-    }
+    closeUserInfoPanel();
     // Clean up ResizeObserver for scroll-down button
     if (window._composerResizeObs) { window._composerResizeObs.disconnect(); window._composerResizeObs = null; }
   }
@@ -743,7 +745,9 @@ function go(p, param, _hist = 'push') {
   if (_hist !== 'none') {
     const _url = (p === 'profile' && param) ? `/profile/${param}`
                : (p === 'chat' && param) ? `/chat/${param}`
-               : ['feed','login','register','search','hashtag'].includes(p) ? '/'
+               : (p === 'hashtag' && param) ? `/hashtag/${encodeURIComponent(param)}`
+               : (p === 'search') ? '/search'
+               : ['feed','login','register'].includes(p) ? '/'
                : `/${p}`;
     try {
       if (_hist === 'replace') history.replaceState({ p, param: param || null }, '', _url);
@@ -1235,8 +1239,8 @@ async function openPostReactPicker(postId, btn) {
   document.querySelectorAll('.react-picker').forEach(p => p.remove());
   const picker = document.createElement('div');
   picker.className = 'react-picker';
-  picker.style.cssText = 'position:absolute;background:var(--card-bg,#111);border:1px solid var(--border,#222);border-radius:8px;padding:6px;display:flex;gap:4px;z-index:100;font-size:20px';
-  picker.innerHTML = ALLOWED_POST_EMOJI.map(e => `<button style="background:none;border:none;cursor:pointer;padding:4px;border-radius:4px" onclick="pickPostEmoji('${postId}','${e}',this)">${e}</button>`).join('');
+  picker.setAttribute('role', 'listbox');
+  picker.innerHTML = ALLOWED_POST_EMOJI.map(e => `<button type="button" class="react-picker-btn" onclick="pickPostEmoji('${postId}','${e}',this)" aria-label="Реакция ${e}">${e}</button>`).join('');
   const rect = btn.getBoundingClientRect();
   picker.style.top = (window.scrollY + rect.bottom + 4) + 'px';
   picker.style.left = rect.left + 'px';
@@ -1935,7 +1939,9 @@ async function renderArtists(app) {
 
 function artRow(a) {
   return `
-    <div class="artist-row" onclick="go('profile','${esc(a.username)}')">
+    <div class="artist-row" role="button" tabindex="0"
+      onclick="go('profile','${esc(a.username)}')"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('profile','${esc(a.username)}')}">
       ${avatarEl(a.avatar, 'avatar', initial(a.display_name))}
       <div class="artist-info">
         <div class="artist-name">@${esc(a.username)}${verifiedBadge(a.is_verified, a.badge_type)}</div>
@@ -2012,7 +2018,9 @@ async function renderSearch(app, initQuery) {
         let html = '<div class="search-section">';
         msgResults.forEach(m => {
           const chatName = m.is_group ? (m.title || 'Группа') : (m.other_name || 'Диалог');
-          html += `<div class="artist-row" style="cursor:pointer" onclick="jumpToMessage('${esc(m.id)}','${esc(m.conv_id)}')">
+          html += `<div class="artist-row" style="cursor:pointer" role="button" tabindex="0"
+            onclick="jumpToMessage('${esc(m.id)}','${esc(m.conv_id)}')"
+            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();jumpToMessage('${esc(m.id)}','${esc(m.conv_id)}')}">
             ${avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))}
             <div class="artist-info">
               <div class="artist-name" style="font-size:12px;color:var(--muted)">${esc(chatName)} · ${esc(m.display_name)}</div>
@@ -2028,7 +2036,9 @@ async function renderSearch(app, initQuery) {
       let html = '';
       if (tab === 'users') {
         html = r.users.length
-          ? r.users.map(u => `<div class="artist-row" onclick="go('profile','${esc(u.username)}')">
+          ? r.users.map(u => `<div class="artist-row" role="button" tabindex="0"
+              onclick="go('profile','${esc(u.username)}')"
+              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('profile','${esc(u.username)}')}">
               ${avatarEl(u.avatar,'avatar-sm',initial(u.display_name))}
               <div class="artist-info"><div class="artist-name">${esc(u.display_name)}</div><div class="artist-handle">@${esc(u.username)}</div></div>
             </div>`).join('')
@@ -2604,15 +2614,15 @@ function chatRow(c) {
   if (c.is_group) {
     name = c.title || 'Группа';
     // show up to 3 member avatars
-    const avatars = c.members.slice(0,3).map(m => avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))).join('');
+    const avatars = c.members.slice(0, 3).map(m => avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))).join('');
     avatarHtml = `<div class="avatar-group">${avatars}</div>`;
   } else {
     // direct chat: find the other participant
-    const other = c.members.find(u => u.id !== me.id) || c.members[0];
+    const other = c.members.find(u => !sameId(u.id, me?.id)) || c.members[0];
     if (other) {
       name = other.display_name;
       const rawAvatar = avatarEl(other.avatar, 'avatar', initial(other.display_name));
-      avatarHtml = `<div style="position:relative;display:inline-block">${rawAvatar}${isOnline ? '<span class="online-dot" style="position:absolute;bottom:0;right:0"></span>' : ''}</div>`;
+      avatarHtml = `<div class="chat-row-ava-wrap">${rawAvatar}${isOnline ? '<span class="online-dot"></span>' : ''}</div>`;
     }
   }
   // Determine last message preview. Escape text content but leave image tags intact.
@@ -2635,14 +2645,21 @@ function chatRow(c) {
   }
   const isPending = c.my_accepted === false;
   const hasDraft = !!localStorage.getItem(`draft_${c.id}`);
+  const rowTime = formatChatListTime(m?.created_at);
   return `
-    <div class="chat-row${isPending ? ' chat-row-pending' : ''}" onclick="go('chat','${c.id}')">
-      ${avatarHtml}
-      <div class="chat-info">
-        <div class="chat-name">${esc(name)}${hasDraft ? '<span class="chat-draft-note">✏ черновик</span>' : ''}</div>
+    <div class="chat-row${isPending ? ' chat-row-pending' : ''}" onclick="go('chat','${c.id}')" role="link" tabindex="0"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('chat','${c.id}');}">
+      <div class="chat-row-avatar">${avatarHtml}</div>
+      <div class="chat-row-body">
+        <div class="chat-row-top">
+          <span class="chat-name">${esc(name)}${hasDraft ? '<span class="chat-draft-note">черновик</span>' : ''}</span>
+          ${rowTime ? `<span class="chat-row-time">${esc(rowTime)}</span>` : ''}
+        </div>
         <div class="chat-last">${lastHtml}</div>
       </div>
-      ${isPending ? `<div class="chat-pending-badge">ЗАПРОС</div>` : unread>0 ? `<div class="chat-unread">${unread}</div>` : ''}
+      <div class="chat-row-badges">
+        ${isPending ? `<div class="chat-pending-badge">ЗАПРОС</div>` : unread>0 ? `<div class="chat-unread">${unread}</div>` : ''}
+      </div>
     </div>
   `;
 }
@@ -2687,6 +2704,7 @@ async function renderChat(app, cid) {
 
   // Store muted state
   window._chatMutedUntil = conv?.muted_until || null;
+  window._currentChatConv = conv;
   const isMuted = conv?.muted_until && new Date(conv.muted_until) > new Date();
 
   // build header title + avatar
@@ -2697,12 +2715,12 @@ async function renderChat(app, cid) {
   if (conv) {
     if (conv.is_group) {
       title = conv.title;
-      const members = (conv.members || []).filter(m => m.id !== me.id).slice(0, 3);
+      const members = (conv.members || []).filter(m => !sameId(m.id, me?.id)).slice(0, 3);
       if (members.length) {
         headAvatarHtml = `<div class="avatar-group chat-head-group-ava">${members.map(m => avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))).join('')}</div>`;
       }
     } else {
-      const other = (conv.members || []).find(u => u.id !== me.id) || (conv.members || [])[0];
+      const other = (conv.members || []).find(u => !sameId(u.id, me?.id)) || (conv.members || [])[0];
       if (other) {
         title = other.display_name;
         headAvatarHtml = avatarEl(other.avatar, 'avatar-sm', initial(other.display_name));
@@ -2712,19 +2730,8 @@ async function renderChat(app, cid) {
     }
   }
 
-  // Build messages html with unread divider
   const unreadCount = conv?.unread || 0;
-  let msgsHtml = '';
-  if (unreadCount > 0 && msgs.length >= unreadCount) {
-    const dividerIdx = msgs.length - unreadCount;
-    const before = msgs.slice(0, dividerIdx);
-    const after = msgs.slice(dividerIdx);
-    msgsHtml = before.map(msgHtml).join('') +
-      `<div class="unread-divider"><span>${unreadCount} новых</span></div>` +
-      after.map(msgHtml).join('');
-  } else {
-    msgsHtml = msgs.map(msgHtml).join('');
-  }
+  const msgsHtml = buildChatMessagesHtml(msgs, unreadCount, conv);
 
   lastMsgTime = msgs.length ? msgs[msgs.length-1].created_at : '';
   document.body.classList.add('in-chat');
@@ -2732,25 +2739,27 @@ async function renderChat(app, cid) {
   app.innerHTML = `
   <div class="chat-view">
     <div class="chat-head">
-      <span class="chat-back" onclick="go('chats')">←</span>
-      <div class="chat-head-info" ${!conv?.is_group && dmOther ? `onclick="openUserInfoPanel('${esc(dmOther.username)}')"` : ''} style="${!conv?.is_group ? 'cursor:pointer' : ''}">
-        ${headAvatarHtml}
-        <div>
-          <span class="chat-title">${esc(title)}</span>
-          ${lastSeenText ? `<div class="chat-lastseen">${lastSeenText}</div>` : ''}
+      <button type="button" class="chat-back" onclick="go('chats')" aria-label="Назад к чатам">←</button>
+      <div class="chat-head-main${!conv?.is_group && dmOther ? ' chat-head-main--click' : ''}" ${!conv?.is_group && dmOther ? `onclick="openUserInfoPanel('${esc(dmOther.username)}')"` : ''}>
+        <div class="chat-head-avatar">${headAvatarHtml}</div>
+        <div class="chat-head-titles">
+          <div class="chat-title">${esc(title)}</div>
+          ${lastSeenText ? `<div class="chat-lastseen">${lastSeenText}</div>` : (conv?.is_group ? `<div class="chat-lastseen">${(conv.members||[]).length} участников</div>` : '')}
         </div>
       </div>
-      ${conv && conv.is_group ? `<button class="btn btn-sm btn-ghost" onclick="leaveGroupChat('${conv.id}')" title="Покинуть группу">← Выйти</button>` : ''}
-      ${conv && conv.is_group ? `<button class="chat-tool-btn" onclick="toggleGroupMembers()" title="Участники">👥 ${(conv.members||[]).length}</button>` : ''}
-      ${conv && conv.is_group && conv.owner === me?.id ? `<button class="chat-tool-btn" onclick="editGroupInfo('${conv.id}')" title="Редактировать группу">✎</button>` : ''}
-      <button class="chat-tool-btn" onclick="openMediaGallery('${cid}')" title="Медиа">📷</button>
-      <button class="chat-tool-btn" id="chatSearchBtn" onclick="toggleChatSearch('${cid}')" title="Поиск в чате">⌕</button>
-      <button class="chat-tool-btn" onclick="toggleChatMute('${cid}')" title="Уведомления" id="chatMuteBtn">${isMuted ? '🔕' : '🔔'}</button>
-      <button class="chat-export-btn" title="Экспорт в TXT" onclick="exportChat('${cid}')">↓TXT</button>
+      <div class="chat-head-tools">
+        ${conv && conv.is_group ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="leaveGroupChat('${conv.id}')" title="Покинуть группу">🚪</button>` : ''}
+        ${conv && conv.is_group ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="toggleGroupMembers()" title="Участники">👥</button>` : ''}
+        ${conv && conv.is_group && conv.owner === me?.id ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="editGroupInfo('${conv.id}')" title="Группа">✎</button>` : ''}
+        <button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="openMediaGallery('${cid}')" title="Медиа">📷</button>
+        <button type="button" class="chat-tool-btn chat-tool-btn--icon" id="chatSearchBtn" onclick="toggleChatSearch('${cid}')" title="Поиск">⌕</button>
+        <button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="toggleChatMute('${cid}')" title="Уведомления" id="chatMuteBtn">${isMuted ? '🔕' : '🔔'}</button>
+        <button type="button" class="chat-tool-btn chat-tool-btn--icon chat-tool-btn--export" title="Экспорт TXT" onclick="exportChat('${cid}')">↓</button>
+      </div>
     </div>
     ${chatPinnedMsg ? `<div class="pinned-msg-bar" id="pinnedBar" onclick="scrollToPinned('${chatPinnedMsg.id}')">
       📌 <span>${esc((chatPinnedMsg.content || (chatPinnedMsg.file_type ? '📎' : '')).slice(0,60))}</span>
-      ${conv && (conv.is_group ? conv.owner === (me?.id) : true) ? `<button onclick="event.stopPropagation();unpinMessage('${cid}')" style="margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer">✕</button>` : ''}
+      ${conv && (conv.is_group ? conv.owner === (me?.id) : true) ? `<button type="button" class="pinned-msg-unpin" onclick="event.stopPropagation();unpinMessage('${cid}')" aria-label="Открепить">✕</button>` : ''}
     </div>` : ''}
     <div id="chatSearchPanel" class="chat-search-panel hidden">
       <input id="chatSearchInput" class="chat-search-input" placeholder="Поиск в переписке..." oninput="debouncedChatSearch('${cid}')">
@@ -2770,22 +2779,24 @@ async function renderChat(app, cid) {
     <button id="scrollDownBtn" class="scroll-down-btn hidden" onclick="scrollChatToBottom()">↓</button>
     <div class="composer chat-composer">
       ${myAccepted ? `
-      <div id="composerNormal">
-        <textarea id="msgText" placeholder="Сообщение..." rows="1"></textarea>
-        <div class="chat-toolbar">
-          <button class="chat-tool-btn" id="voiceBtn" title="Голосовое">◉</button>
+      <div id="composerNormal" class="composer-messenger">
+        <div class="composer-messenger-row">
+          <button type="button" class="chat-tool-btn chat-tool-btn--icon" id="voiceBtn" title="Голосовое">◉</button>
           <div class="chat-attach-wrap" id="chatAttachWrap">
-            <button class="chat-tool-btn" onclick="toggleChatAttach()" title="Прикрепить">⊕</button>
+            <button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="toggleChatAttach()" title="Прикрепить">⊕</button>
             <div class="chat-attach-menu hidden" id="chatAttachMenu">
               <label class="attach-opt" for="msgImgFile" onclick="closeChatAttach()">↑ фото / видео</label>
               <label class="attach-opt" for="msgFile" onclick="closeChatAttach()">◫ файл</label>
             </div>
           </div>
-          <input type="file" id="msgImgFile" accept="image/*,video/*,.heic,.heif" style="display:none">
-          <input type="file" id="msgFile" style="display:none">
-          <span class="chat-attach-name" id="msgFileName"></span>
-          <button class="chat-send-btn btn btn-sm" onclick="sendMsg('${cid}')">→</button>
+          <input type="file" id="msgImgFile" accept="image/*,video/*,.heic,.heif" class="hidden">
+          <input type="file" id="msgFile" class="hidden">
+          <div class="composer-messenger-input-wrap">
+            <textarea id="msgText" placeholder="Сообщение..." rows="1" autocomplete="off"></textarea>
+          </div>
+          <button class="chat-send-btn" id="msgSendBtn" type="button" title="Отправить" aria-label="Отправить">➤</button>
         </div>
+        <div class="composer-messenger-meta"><span class="chat-attach-name" id="msgFileName"></span></div>
       </div>
       <div id="voiceRecBar" class="voice-rec-bar hidden">
         <button class="chat-tool-btn vr-cancel-btn" onclick="cancelRecording()" title="Отмена">✕</button>
@@ -2873,6 +2884,13 @@ async function renderChat(app, cid) {
       }
     }
   }
+  // Rebind send button explicitly to avoid stale inline handlers on rerenders.
+  const sendBtn = document.getElementById('msgSendBtn');
+  if (sendBtn) {
+    const newSendBtn = sendBtn.cloneNode(true);
+    sendBtn.parentNode.replaceChild(newSendBtn, sendBtn);
+    newSendBtn.addEventListener('click', () => sendMsg(cid));
+  }
 
   // Show unread count on scroll-down button
   if (unreadCount > 0) {
@@ -2896,8 +2914,10 @@ async function renderChat(app, cid) {
       chatMsgsEl.querySelectorAll('.msg.active').forEach(m => m.classList.remove('active'));
       if (clickedMsg && !wasActive) clickedMsg.classList.add('active');
     });
-    // Scroll-to-bottom button visibility
-    chatMsgsEl.addEventListener('scroll', () => {
+    // Combined scroll handler:
+    // - toggles scroll-down button visibility
+    // - lazy-loads older messages near top
+    chatMsgsEl.addEventListener('scroll', async () => {
       const atBottom = chatMsgsEl.scrollHeight - chatMsgsEl.scrollTop - chatMsgsEl.clientHeight < 80;
       if (atBottom) {
         const btn = document.getElementById('scrollDownBtn');
@@ -2905,9 +2925,6 @@ async function renderChat(app, cid) {
       } else {
         document.getElementById('scrollDownBtn')?.classList.remove('hidden');
       }
-    }, { passive: true });
-    // Infinite scroll up: load older messages
-    chatMsgsEl.addEventListener('scroll', async () => {
       if (chatMsgsEl.scrollTop < 80 && window._chatHasMore && !window._chatLoadingMore && currentChatId) {
         window._chatLoadingMore = true;
         try {
@@ -2915,7 +2932,23 @@ async function renderChat(app, cid) {
           const older = r.messages || [];
           if (older.length) {
             const prevH = chatMsgsEl.scrollHeight;
-            chatMsgsEl.insertAdjacentHTML('afterbegin', older.map(msgHtml).join(''));
+            const existingFirst = chatMsgsEl.querySelector('.msg[data-id]');
+            const firstStub = existingFirst
+              ? { sender_id: existingFirst.dataset.sender, deleted_at: null, created_at: existingFirst.dataset.created }
+              : null;
+            let olderHtml = '';
+            let lastDay = null;
+            for (let i = 0; i < older.length; i++) {
+              const m = older[i];
+              const dk = chatDayKey(m.created_at);
+              if (dk !== lastDay) {
+                const skipSep = i === 0 && firstStub && dk === chatDayKey(firstStub.created_at);
+                if (!skipSep) olderHtml += chatDateSeparatorHtml(m.created_at);
+                lastDay = dk;
+              }
+              olderHtml += msgHtml(m, i ? older[i - 1] : null, i < older.length - 1 ? older[i + 1] : firstStub);
+            }
+            chatMsgsEl.insertAdjacentHTML('afterbegin', olderHtml);
             chatMsgsEl.scrollTop = chatMsgsEl.scrollHeight - prevH;
             window._chatOldestTs = older[0].created_at;
             loadLinkPreviews(chatMsgsEl).catch(() => {});
@@ -2971,18 +3004,114 @@ async function declineDmRequest(cid) {
   } catch (e) { toast.error('Ошибка: ' + e.message); }
 }
 
-function msgHtml(m) {
-  const mine = me && m.sender_id === me.id;
+/** Parse API datetime to Date (UTC-safe). */
+function parseChatDate(iso) {
+  if (!iso) return new Date();
+  const s = String(iso).endsWith('Z') ? iso : String(iso).replace(' ', 'T') + 'Z';
+  return new Date(s);
+}
+
+function chatDayKey(iso) {
+  const d = parseChatDate(iso);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+function todayKey() {
+  const n = new Date();
+  return `${n.getFullYear()}-${n.getMonth() + 1}-${n.getDate()}`;
+}
+
+function chatDateSeparatorHtml(iso) {
+  const d = parseChatDate(iso);
+  const todayK = todayKey();
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  const yK = `${y.getFullYear()}-${y.getMonth() + 1}-${y.getDate()}`;
+  const dk = chatDayKey(iso);
+  let label;
+  if (dk === todayK) label = 'Сегодня';
+  else if (dk === yK) label = 'Вчера';
+  else label = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  return `<div class="msg-day-sep" role="separator"><span>${esc(label)}</span></div>`;
+}
+
+function formatChatMsgTime(iso) {
+  return parseChatDate(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatChatListTime(iso) {
+  if (!iso) return '';
+  const d = parseChatDate(iso);
+  const now = new Date();
+  if (chatDayKey(iso) === todayKey()) {
+    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  }
+  if (now.getTime() - d.getTime() < 6 * 864e5) {
+    return d.toLocaleDateString('ru-RU', { weekday: 'short' });
+  }
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+}
+
+function sameMsgCluster(prev, m) {
+  return prev && !prev.deleted_at && !m.deleted_at && sameId(prev.sender_id, m.sender_id);
+}
+
+function buildMsgsSequential(msgs) {
+  let html = '';
+  let lastDay = null;
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    const dk = chatDayKey(m.created_at);
+    if (dk !== lastDay) {
+      lastDay = dk;
+      html += chatDateSeparatorHtml(m.created_at);
+    }
+    const prev = i > 0 ? msgs[i - 1] : null;
+    const next = i < msgs.length - 1 ? msgs[i + 1] : null;
+    html += msgHtml(m, prev, next);
+  }
+  return html;
+}
+
+function buildChatMessagesHtml(msgs, unreadCount, conv) {
+  window._chatRenderConv = conv;
+  let inner = '';
+  if (unreadCount > 0 && msgs.length >= unreadCount) {
+    const dividerIdx = msgs.length - unreadCount;
+    inner += buildMsgsSequential(msgs.slice(0, dividerIdx));
+    inner += `<div class="unread-divider"><span>${unreadCount} новых</span></div>`;
+    inner += buildMsgsSequential(msgs.slice(dividerIdx));
+  } else {
+    inner = buildMsgsSequential(msgs);
+  }
+  window._chatRenderConv = null;
+  return inner;
+}
+
+function msgHtml(m, prev, next) {
+  const mine = me && sameId(m.sender_id, me.id);
+  const conv = window._chatRenderConv || window._currentChatConv;
+  const isGroup = !!(conv && conv.is_group);
+  let clusterClass = '';
+  if (sameMsgCluster(prev, m)) {
+    clusterClass = sameMsgCluster(m, next) ? 'msg-cluster-mid' : 'msg-cluster-last';
+  } else if (sameMsgCluster(m, next)) {
+    clusterClass = 'msg-cluster-first';
+  }
+  const showSender = isGroup && !mine && !sameMsgCluster(prev, m) && (m.display_name || m.username);
   // if message is deleted
   if (m.deleted_at) {
     return `
-      <div class="msg ${mine ? 'me' : ''}" data-id="${m.id}">
+      <div class="msg ${mine ? 'me' : ''} ${clusterClass}" data-id="${m.id}" data-sender="${m.sender_id || ''}" data-created="${m.created_at}">
         ${mine ? '' : avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))}
-        <div class="msg-body"><div class="msg-text" style="font-style:italic;color:var(--fg3)">[удалено]</div></div>
+        <div class="msg-body"><div class="msg-text msg-text--deleted">[удалено]</div></div>
       </div>
     `;
   }
   const parts = [];
+  if (showSender) {
+    parts.push(`<div class="msg-sender-label">${esc(m.display_name || m.username || '')}</div>`);
+  }
   if (m.forwarded_from) {
     parts.push(`<div class="msg-forwarded">⏩ Пересланное</div>`);
   }
@@ -3009,14 +3138,14 @@ function msgHtml(m) {
       parts.push(`<div class="msg-file"><a href="${esc(m.file)}" target="_blank"${dlAttr}>${esc(label)}</a></div>`);
     }
   }
-  // time label with edited mark
-  let timeLabel = timeAgo(m.created_at);
-  if (m.edited_at) timeLabel += ' (изм.)';
+  const timeTitle = timeAgo(m.created_at);
+  let timeLabel = formatChatMsgTime(m.created_at);
+  if (m.edited_at) timeLabel += ' · изм.';
   if (mine) {
     const isRead = chatOtherLastRead && new Date(chatOtherLastRead) >= new Date(m.created_at);
-    parts.push(`<div class="msg-time">${timeLabel}<span class="msg-tick${isRead ? ' read' : ''}">${isRead ? '✓✓' : '✓'}</span></div>`);
+    parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}<span class="msg-tick${isRead ? ' read' : ''}">${isRead ? '✓✓' : '✓'}</span></div>`);
   } else {
-    parts.push(`<div class="msg-time">${timeLabel}</div>`);
+    parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}</div>`);
   }
   parts.push(`<div class="reaction-bar" data-mid="${m.id}">${reactionBarHtml(m.id, m.reactions || [])}</div>`);
   const actions = `
@@ -3028,7 +3157,7 @@ function msgHtml(m) {
       <button onclick="forwardMsg('${m.id}','${currentChatId}')" title="Переслать">⏩</button>
     </div>`;
   return `
-    <div class="msg ${mine ? 'me' : ''}" data-id="${m.id}" data-created="${m.created_at}" data-file="${m.file || ''}" data-file-type="${m.file_type || ''}">
+    <div class="msg ${mine ? 'me' : ''} ${clusterClass}" data-id="${m.id}" data-sender="${m.sender_id ?? ''}" data-created="${m.created_at}" data-file="${m.file || ''}" data-file-type="${m.file_type || ''}">
       ${mine ? '' : avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))}
       <div class="msg-body">
         ${parts.join('')}
@@ -3101,9 +3230,11 @@ async function sendMsg(cid) {
   const txtEl = $('#msgText');
   const fileEl = document.getElementById('msgFile');
   const imgFileEl = document.getElementById('msgImgFile');
+  const sendBtn = document.getElementById('msgSendBtn');
   const content = (txtEl?.value || '').trim();
   const file = imgFileEl?.files?.[0] || fileEl?.files?.[0];
   if (!content && !file) return;
+  if (window._chatSending) return;
   // Validate file size: maximum 4GB (4 * 1024^3 bytes)
   if (file && file.size > 4 * 1024 * 1024 * 1024) {
     toast.error('Максимум 4 ГБ для файла');
@@ -3116,6 +3247,11 @@ async function sendMsg(cid) {
     fd.append('reply_to', replyToMsg.id);
     fd.append('reply_text', replyToMsg.text);
     cancelMsgReply();
+  }
+  window._chatSending = true;
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.style.opacity = '0.6';
   }
   try {
     await api('/chats/'+cid+'/messages', { method:'POST', body: fd });
@@ -3147,6 +3283,12 @@ async function sendMsg(cid) {
     }
   } catch (e) {
     toast.error(e.message);
+  } finally {
+    window._chatSending = false;
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.style.opacity = '';
+    }
   }
 }
 
@@ -3478,6 +3620,13 @@ function fmtStat(n) {
   return String(n);
 }
 
+function fmtHubTs(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
 async function renderHub(app) {
   if (!me || !me.is_admin) return go('feed');
   app.innerHTML = '<div class="page-title">◈ HUB</div><div class="empty">· · ·</div>';
@@ -3489,7 +3638,8 @@ async function renderHub(app) {
   const groups = ['SOCIALS','MUSIC','STREAMS','CHATS'];
 
   function statBadge(platId) {
-    const d = ext[platId];
+    const wrap = ext[platId];
+    const d = wrap?.data ?? wrap;
     if (!d) return '';
     const parts = [];
     if (d.subscribers != null) parts.push(`<span class="hub-live-stat">${fmtStat(d.subscribers)} <span class="hub-live-lbl">subs</span></span>`);
@@ -3498,11 +3648,17 @@ async function renderHub(app) {
     if (d.tracks     != null) parts.push(`<span class="hub-live-stat">${fmtStat(d.tracks)} <span class="hub-live-lbl">tracks</span></span>`);
     if (d.tweets     != null) parts.push(`<span class="hub-live-stat">${fmtStat(d.tweets)} <span class="hub-live-lbl">tweets</span></span>`);
     if (d.videos     != null) parts.push(`<span class="hub-live-stat">${fmtStat(d.videos)} <span class="hub-live-lbl">videos</span></span>`);
-    return parts.length ? `<div class="hub-live-stats">${parts.join('')}</div>` : '';
+    const stamp = wrap?.updated_at
+      ? `<div class="hub-live-lbl" style="margin-top:4px">${wrap.cached ? 'кеш' : 'live'} · ${fmtHubTs(wrap.updated_at)}</div>`
+      : '';
+    return parts.length ? `<div class="hub-live-stats">${parts.join('')}</div>${stamp}` : stamp;
   }
 
   app.innerHTML = `
-    <div class="page-title">◈ HUB <span style="font-size:0.55rem;opacity:0.4;font-weight:400">METRICS</span></div>
+    <div class="page-title-row">
+      <span class="page-title">◈ HUB <span style="font-size:0.55rem;opacity:0.4;font-weight:400">METRICS</span></span>
+      <button class="btn btn-sm btn-ghost" onclick="refreshHubExternal()">↻ ОБНОВИТЬ</button>
+    </div>
 
     <div class="hub-w0pium">
       <div class="hub-section-title">W0PIUM</div>
@@ -3577,6 +3733,16 @@ async function saveHubKey(platformId) {
     el.value = '';
     el.placeholder = '••••' + key.slice(-4);
   } catch (e) { toast.error(e.message); }
+}
+
+async function refreshHubExternal() {
+  try {
+    await api('/hub/external?refresh=1');
+    toast.success('Hub обновлён');
+    await renderHub(document.getElementById('app'));
+  } catch (e) {
+    toast.error(e.message);
+  }
 }
 
 let adminTab = 'stats';
@@ -3709,7 +3875,7 @@ async function adminResolveReport(rid) {
 
 function adminUserRow(u) {
   const isBanned = !!u.banned_at;
-  const isMe = me && u.id === me.id;
+  const isMe = me && sameId(u.id, me.id);
   return `
     <div class="admin-row ${isBanned?'banned':''}" id="auser-${esc(u.id)}">
       ${avatarEl(u.avatar, 'avatar-sm', initial(u.display_name))}
@@ -4074,6 +4240,7 @@ async function exportData() {
 
 async function exportChat(cid) {
   try {
+    toast.loading('Готовим TXT экспорт...');
     const r = await fetch(`/api/chats/${cid}/export`, { headers: { 'X-CSRF-Token': csrfToken } });
     if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Ошибка'); }
     const blob = await r.blob();
@@ -4081,6 +4248,7 @@ async function exportChat(cid) {
     const a = document.createElement('a');
     a.href = url; a.download = `chat-${cid.slice(0,8)}.txt`; a.click();
     URL.revokeObjectURL(url);
+    toast.success('TXT экспорт скачан');
   } catch (e) { toast.error(e.message); }
 }
 
@@ -4300,13 +4468,13 @@ async function forwardMsg(mid, cid) {
   if (!others.length) { toast('Нет других чатов'); return; }
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
-  modal.innerHTML = `<div class="modal" style="max-width:320px">
-    <div class="modal-head"><b>Переслать в...</b><button onclick="this.closest('.modal-overlay').remove()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted)">✕</button></div>
-    <div style="max-height:300px;overflow-y:auto">
+  modal.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>Переслать в...</b><button type="button" class="modal-icon-dismiss" onclick="this.closest('.modal-overlay').remove()" aria-label="Закрыть">✕</button></div>
+    <div class="modal-scroll-y">
       ${others.map(c => {
         const other = (c.members||[]).find(u => u.id !== (window.me?.id));
         const name = c.is_group ? (c.title || 'Группа') : (other?.display_name || 'Диалог');
-        return `<div class="modal-item" onclick="doForwardMsg('${mid}','${cid}','${c.id}',this.closest('.modal-overlay'))" style="padding:0.5rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.5rem">
+        return `<div class="modal-list-item modal-list-item--row" onclick="doForwardMsg('${mid}','${cid}','${c.id}',this.closest('.modal-overlay'))">
           ${avatarEl(other?.avatar,'avatar-sm',initial(name))}
           <span>${esc(name)}</span>
         </div>`;
@@ -4345,10 +4513,10 @@ async function toggleChatMute(cid) {
     ];
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
-    modal.innerHTML = `<div class="modal" style="max-width:250px">
+    modal.innerHTML = `<div class="modal modal--mute">
       <div class="modal-head"><b>Отключить уведомления</b></div>
-      ${opts.map(o => `<div class="modal-item" onclick="doChatMute('${cid}',${o.hours},this.closest('.modal-overlay'))" style="padding:0.6rem 0.75rem;cursor:pointer">${o.label}</div>`).join('')}
-      <div class="modal-item" onclick="this.closest('.modal-overlay').remove()" style="padding:0.6rem 0.75rem;cursor:pointer;color:var(--muted)">Отмена</div>
+      ${opts.map(o => `<div class="modal-list-item" onclick="doChatMute('${cid}',${o.hours},this.closest('.modal-overlay'))">${esc(o.label)}</div>`).join('')}
+      <div class="modal-list-item modal-list-item--muted" onclick="this.closest('.modal-overlay').remove()">Отмена</div>
     </div>`;
     document.body.appendChild(modal);
   }
@@ -4369,8 +4537,7 @@ async function doChatMute(cid, hours, modal) {
 
 function bindChatMentionAutocomplete(textarea, members) {
   const dropdown = document.createElement('div');
-  dropdown.className = 'mention-dropdown';
-  dropdown.style.cssText = 'display:none;position:absolute;background:var(--card-bg,#111);border:1px solid var(--border,#222);border-radius:6px;z-index:200;min-width:160px;max-height:160px;overflow-y:auto';
+  dropdown.className = 'mention-dropdown mention-dropdown--float';
   textarea.parentElement.style.position = 'relative';
   textarea.parentElement.appendChild(dropdown);
 
@@ -4385,13 +4552,13 @@ function bindChatMentionAutocomplete(textarea, members) {
       m.username?.toLowerCase().startsWith(q) || m.display_name?.toLowerCase().startsWith(q)
     ).slice(0, 5);
     if (!matches.length) { dropdown.style.display = 'none'; return; }
-    dropdown.style.display = '';
+    dropdown.style.display = 'block';
     dropdown.innerHTML = matches.map(m => `
-      <div class="mention-item" style="padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:6px"
+      <div class="mention-item-row"
         onmousedown="event.preventDefault();insertChatMention(${JSON.stringify(textarea.id)},'${esc(m.username)}')">
         ${avatarEl(m.avatar,'avatar-xs',initial(m.display_name))}
         <span>${esc(m.display_name)}</span>
-        <span style="color:var(--muted);font-size:12px">@${esc(m.username)}</span>
+        <span class="mention-item-handle">@${esc(m.username)}</span>
       </div>`).join('');
   });
   textarea.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 200));
@@ -4416,7 +4583,7 @@ function insertChatMention(textareaId, username) {
 function dropHtml(d) {
   const msLeft = new Date(d.created_at).getTime() + 24 * 3600 * 1000 - Date.now();
   const hoursLeft = Math.max(0, Math.ceil(msLeft / 3600000));
-  const mine = me && d.user_id === me.id;
+  const mine = me && sameId(d.user_id, me.id);
   let track = '';
   if (d.track_url) {
     const url = d.track_url.trim();
@@ -5643,14 +5810,14 @@ async function openMediaGallery(cid) {
   modal.innerHTML = `<div class="modal media-gallery-modal">
     <div class="modal-head">
       <b>Медиа и файлы</b>
-      <div style="display:flex;gap:6px;margin-left:auto">
-        <button class="gallery-tab active" data-tab="images" onclick="switchGalleryTab(this,'images','${cid}')">Фото</button>
-        <button class="gallery-tab" data-tab="audio" onclick="switchGalleryTab(this,'audio','${cid}')">Аудио</button>
-        <button class="gallery-tab" data-tab="files" onclick="switchGalleryTab(this,'files','${cid}')">Файлы</button>
-        <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:18px;padding:0 4px">✕</button>
+      <div class="modal-head-actions">
+        <button type="button" class="gallery-tab active" data-tab="images" onclick="switchGalleryTab(this,'images','${cid}')">Фото</button>
+        <button type="button" class="gallery-tab" data-tab="audio" onclick="switchGalleryTab(this,'audio','${cid}')">Аудио</button>
+        <button type="button" class="gallery-tab" data-tab="files" onclick="switchGalleryTab(this,'files','${cid}')">Файлы</button>
+        <button type="button" class="modal-icon-dismiss" onclick="this.closest('.modal-overlay').remove()" aria-label="Закрыть">✕</button>
       </div>
     </div>
-    <div id="galleryContent" style="min-height:200px;max-height:60vh;overflow-y:auto;padding:8px"></div>
+    <div id="galleryContent" class="gallery-body"></div>
   </div>`;
   document.body.appendChild(modal);
   await loadGalleryTab('images', cid);
@@ -5659,7 +5826,7 @@ async function openMediaGallery(cid) {
 async function loadGalleryTab(tab, cid) {
   const el = document.getElementById('galleryContent');
   if (!el) return;
-  el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">Загрузка...</div>';
+  el.innerHTML = '<div class="gallery-state-msg">Загрузка...</div>';
   try {
     const items = await api(`/chats/${cid}/media`);
     const filtered = items.filter(m => {
@@ -5668,23 +5835,23 @@ async function loadGalleryTab(tab, cid) {
       if (tab === 'files') return m.file_type && !m.file_type.startsWith('image/') && !m.file_type.startsWith('audio/');
       return true;
     });
-    if (!filtered.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">Ничего нет</div>'; return; }
+    if (!filtered.length) { el.innerHTML = '<div class="gallery-state-msg">Ничего нет</div>'; return; }
     if (tab === 'images') {
-      el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
-        ${filtered.map(m => `<img src="${esc(m.file)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;cursor:pointer" onclick="openImg('${esc(m.file)}')" loading="lazy">`).join('')}
+      el.innerHTML = `<div class="gallery-grid">
+        ${filtered.map(m => `<img class="gallery-thumb" src="${esc(m.file)}" alt="" onclick="openImg('${esc(m.file)}')" loading="lazy">`).join('')}
       </div>`;
     } else if (tab === 'audio') {
-      el.innerHTML = filtered.map(m => `<div style="padding:6px 0;border-bottom:1px solid var(--border)">${voicePlayerHtml(m.file, m.id, m.file_name)}<div style="font-size:11px;color:var(--muted);margin-top:2px">${timeAgo(m.created_at)} · ${esc(m.display_name)}</div></div>`).join('');
+      el.innerHTML = filtered.map(m => `<div class="gallery-audio-row">${voicePlayerHtml(m.file, m.id, m.file_name)}<div class="gallery-audio-meta">${timeAgo(m.created_at)} · ${esc(m.display_name)}</div></div>`).join('');
     } else {
-      el.innerHTML = filtered.map(m => `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
-        <span style="font-size:20px">📄</span>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><a href="${esc(m.file)}" download="${esc(m.file_name||'file')}" style="color:inherit">${esc(m.file_name||'файл')}</a></div>
-          <div style="font-size:11px;color:var(--muted)">${timeAgo(m.created_at)} · ${esc(m.display_name)}</div>
+      el.innerHTML = filtered.map(m => `<div class="gallery-file-row">
+        <span class="gallery-file-icon" aria-hidden="true">📄</span>
+        <div class="gallery-file-main">
+          <div class="gallery-file-name"><a href="${esc(m.file)}" download="${esc(m.file_name||'file')}">${esc(m.file_name||'файл')}</a></div>
+          <div class="gallery-file-meta">${timeAgo(m.created_at)} · ${esc(m.display_name)}</div>
         </div>
       </div>`).join('');
     }
-  } catch { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">Ошибка загрузки</div>'; }
+  } catch { el.innerHTML = '<div class="gallery-state-msg">Ошибка загрузки</div>'; }
 }
 
 function switchGalleryTab(btn, tab, cid) {
@@ -5767,21 +5934,32 @@ function playNotifSound() {
 
 // ── EDIT GROUP INFO ──
 
+function closeUserInfoPanel() {
+  const panel = document.getElementById('userInfoPanel');
+  if (window._uipCloseHandler) {
+    document.removeEventListener('click', window._uipCloseHandler);
+    window._uipCloseHandler = null;
+  }
+  if (!panel) return;
+  panel.classList.remove('user-info-panel--open');
+  setTimeout(() => { panel.remove(); }, 220);
+}
+
 async function editGroupInfo(cid) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
-  modal.innerHTML = `<div class="modal" style="max-width:320px">
-    <div class="modal-head"><b>Редактировать группу</b><button onclick="this.closest('.modal-overlay').remove()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted)">✕</button></div>
-    <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
+  modal.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>Редактировать группу</b><button type="button" class="modal-icon-dismiss" onclick="this.closest('.modal-overlay').remove()" aria-label="Закрыть">✕</button></div>
+    <div class="modal-form-stack">
       <div>
-        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">Название</label>
-        <input id="editGroupTitle" class="composer-input" style="width:100%" placeholder="Название группы">
+        <label class="modal-field-label" for="editGroupTitle">Название</label>
+        <input id="editGroupTitle" class="input modal-field-input" placeholder="Название группы">
       </div>
       <div>
-        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">Аватар группы</label>
-        <input type="file" id="editGroupAvatar" accept="image/*" style="font-size:13px;color:var(--fg2)">
+        <label class="modal-field-label" for="editGroupAvatar">Аватар группы</label>
+        <input type="file" id="editGroupAvatar" accept="image/*" class="modal-file-input">
       </div>
-      <button class="btn" onclick="saveGroupInfo('${cid}',this.closest('.modal-overlay'))">Сохранить</button>
+      <button type="button" class="btn" onclick="saveGroupInfo('${cid}',this.closest('.modal-overlay'))">Сохранить</button>
     </div>
   </div>`;
   document.body.appendChild(modal);
@@ -5823,45 +6001,47 @@ async function openUserInfoPanel(username) {
   if (!username) return;
   // Close if already open
   const existing = document.getElementById('userInfoPanel');
-  if (existing) { existing.remove(); return; }
+  if (existing) {
+    if (window._uipCloseHandler) {
+      document.removeEventListener('click', window._uipCloseHandler);
+      window._uipCloseHandler = null;
+    }
+    existing.remove();
+    return;
+  }
   let user = null;
   try { user = await api(`/user/${username}`); } catch { return; }
   const panel = document.createElement('div');
   panel.id = 'userInfoPanel';
-  panel.style.cssText = 'position:fixed;right:0;top:0;height:100%;width:min(300px,100vw);background:var(--card-bg,#111);border-left:1px solid var(--border,#222);z-index:50;overflow-y:auto;transform:translateX(100%);transition:transform 0.25s ease;padding:16px';
+  panel.className = 'user-info-panel';
   panel.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div class="user-info-head">
       <b>Профиль</b>
-      <button onclick="document.getElementById('userInfoPanel')?.remove()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:20px">✕</button>
+      <button type="button" class="modal-icon-dismiss" onclick="closeUserInfoPanel()" aria-label="Закрыть">✕</button>
     </div>
-    <div style="text-align:center;margin-bottom:16px">
+    <div class="user-info-center">
       ${avatarEl(user.avatar, 'avatar', initial(user.display_name))}
-      <div style="font-size:17px;font-weight:600;margin-top:8px">${esc(user.display_name)}</div>
-      <div style="color:var(--muted);font-size:13px">@${esc(user.username)}</div>
+      <div class="user-info-name">${esc(user.display_name)}</div>
+      <div class="user-info-handle">@${esc(user.username)}</div>
     </div>
-    ${user.bio ? `<div style="font-size:13px;color:var(--fg2);margin-bottom:12px;text-align:center">${esc(user.bio)}</div>` : ''}
-    <div style="display:flex;justify-content:center;gap:24px;margin-bottom:16px;font-size:13px;color:var(--muted)">
-      <div style="text-align:center"><div style="font-size:18px;font-weight:600;color:var(--fg)">${user.followers||0}</div>подписчики</div>
-      <div style="text-align:center"><div style="font-size:18px;font-weight:600;color:var(--fg)">${user.following||0}</div>подписки</div>
+    ${user.bio ? `<div class="user-info-bio">${esc(user.bio)}</div>` : ''}
+    <div class="user-info-stats">
+      <div class="user-info-stat"><div class="user-info-stat-val">${user.followers||0}</div>подписчики</div>
+      <div class="user-info-stat"><div class="user-info-stat-val">${user.following||0}</div>подписки</div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn" onclick="go('profile','${esc(user.username)}');document.getElementById('userInfoPanel')?.remove()">Открыть профиль</button>
-      ${!user.is_following ? `<button class="btn btn-ghost" onclick="followUser('${user.id}',this)">Подписаться</button>` : ''}
-      <button class="btn btn-ghost btn-danger" onclick="blockUserFromPanel('${esc(user.username)}')">Заблокировать</button>
+    <div class="user-info-actions">
+      <button type="button" class="btn" onclick="go('profile','${esc(user.username)}');closeUserInfoPanel()">Открыть профиль</button>
+      ${!user.is_following ? `<button type="button" class="btn btn-ghost" onclick="followUser('${user.id}',this)">Подписаться</button>` : ''}
+      <button type="button" class="btn btn-ghost btn-danger" onclick="blockUserFromPanel('${esc(user.username)}')">Заблокировать</button>
     </div>
   `;
   document.body.appendChild(panel);
-  // Animate in
-  requestAnimationFrame(() => { requestAnimationFrame(() => { panel.style.transform = 'translateX(0)'; }); });
-  // Close on outside click — store ref so go() can clean it up too
+  requestAnimationFrame(() => { requestAnimationFrame(() => { panel.classList.add('user-info-panel--open'); }); });
   if (window._uipCloseHandler) document.removeEventListener('click', window._uipCloseHandler);
   setTimeout(() => {
     const close = e => {
-      if (!panel.contains(e.target) && !document.querySelector('.chat-head-info')?.contains(e.target)) {
-        panel.style.transform = 'translateX(100%)';
-        setTimeout(() => { panel.remove(); }, 250);
-        document.removeEventListener('click', close);
-        window._uipCloseHandler = null;
+      if (!panel.contains(e.target) && !document.querySelector('.chat-head-main')?.contains(e.target)) {
+        closeUserInfoPanel();
       }
     };
     window._uipCloseHandler = close;
@@ -5874,7 +6054,7 @@ async function blockUserFromPanel(username) {
   try {
     await api(`/user/${username}/block`, { method: 'POST' });
     toast('Пользователь заблокирован');
-    document.getElementById('userInfoPanel')?.remove();
+    closeUserInfoPanel();
     go('chats');
   } catch (e) { toast.error(e.message || 'Ошибка'); }
 }

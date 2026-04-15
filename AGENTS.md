@@ -140,13 +140,16 @@ eventSrc.addEventListener('my_event', e => {
 
 ## Деплой на Synology
 
-### Полный пересборка (при изменении зависимостей или Dockerfile)
+Команды для планировщика DSM: **`scripts/DSM-TASKS.md`**.
+
+### Полный пересборка (зависимости, Dockerfile, **или фронт `public/`**)
 
 ```bash
-# Запускается через DSM Task Scheduler — Задача 4
 cd /volume1/docker/w0pium
-/usr/local/bin/docker compose up --build -d
+docker compose up --build -d
 ```
+
+**`public/` и bind-mount:** в базовом `docker-compose.yml` каталог `public/` **не** монтируется с хоста — статика берётся из образа после `COPY public/` в Dockerfile. Иначе старые файлы на диске перекрыли бы образ, и пересборка не обновила бы UI. Для локальной правки `public/` без rebuild см. комментарии в `docker-compose.yml` и файл **`docker-compose.override.example.yml`** → скопировать в `docker-compose.override.yml` (он в `.gitignore`).
 
 ### Быстрый рестарт (только изменился server.js — без пересборки)
 
@@ -227,6 +230,50 @@ RUN npm ci --omit=dev --ignore-scripts && npm rebuild better-sqlite3 sharp
 ```bash
 git config --global --add safe.directory "//MedSkin/docker/w0pium"
 ```
+
+---
+
+### 5. npm / ESLint на UNC-пути
+
+**Проблема:** `npm` / `npm.cmd` поднимает **`cmd.exe`**, который **не держит UNC как cwd** → рабочая папка становится **`C:\Windows`**, отсюда `ENOENT` / `EPERM` на `package.json` / `package-lock.json`. В PowerShell **`npm.ps1`** ещё и ловит политику выполнения.
+
+**Установка зависимостей с UNC:** только через **`pushd`** (даёт букву диска) или готовый **`scripts\npm-install.cmd`**:
+
+```bat
+"\\MedSkin\docker\w0pium\scripts\npm-install.cmd"
+```
+
+Или одной строкой из PowerShell:
+
+```powershell
+cmd /c "pushd \\MedSkin\docker\w0pium && npm install && popd"
+```
+
+**Lint без npm на UNC:** `package.json` вызывает **`node scripts/run-eslint.js`**. С UNC надёжно так:
+
+```powershell
+node "\\MedSkin\docker\w0pium\scripts\run-eslint.js"
+```
+
+Или обёртки (они вызывают только **node** + `run-eslint.js`):
+
+```bat
+"\\MedSkin\docker\w0pium\scripts\lint.cmd"
+```
+
+```powershell
+& "\\MedSkin\docker\w0pium\scripts\lint.ps1"
+```
+
+Если репозиторий на **букве диска** (например после `pushd` / `subst`), обычный **`npm run lint`** снова ок:
+
+```powershell
+pushd \\MedSkin\docker\w0pium
+npm run lint
+popd
+```
+
+**E2E / Playwright** на этой машине без Docker CLI не гонялись; смоки — на NAS (`scripts/auto-pipeline.sh`) или после установки Docker: `npm run e2e:docker:smoke`.
 
 ---
 

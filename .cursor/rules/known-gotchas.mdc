@@ -1,0 +1,84 @@
+---
+description: Known bugs, traps and security rules specific to this codebase. Always loaded.
+alwaysApply: true
+---
+
+# W0PIUM — Known Gotchas & Security Rules
+
+## 1. Helmet 7+ CSP blocks onclick attributes
+
+**Problem:** Helmet 7+ sets `script-src-attr 'none'` by default. All `onclick="..."` in HTML become `null` silently — buttons stop working, no JS errors.
+
+**Fix — already applied in server.js, do not remove:**
+```js
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      scriptSrcAttr: ["'unsafe-inline'"],  // ← required
+      // ... other directives
+    }
+  }
+}));
+```
+
+**Diagnosis:** `typeof document.getElementById('someBtn').onclick` — if `"object"` (null), CSP is cutting handlers.
+
+---
+
+## 2. SQLite: double quotes = column name, not string
+
+**Problem:** `WHERE field = ""` throws `SqliteError: no such column`. This SQLite version treats `""` as an identifier.
+
+**Rule:** always single quotes for string literals: `''`, `'now'`, `'%text%'`.
+
+---
+
+## 3. isSsrfBlocked() is async — always await it
+
+**Problem:** After DNS-resolving was added, `isSsrfBlocked()` became async. Calling it without `await` returns a `Promise<boolean>` which is always truthy — SSRF protection is silently broken.
+
+```js
+// ✅ correct
+if (await isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
+
+// ❌ breaks protection (Promise is truthy, check never blocks)
+if (isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
+```
+
+---
+
+## 4. Dockerfile: native modules need explicit rebuild after --ignore-scripts
+
+**Problem:** `npm ci --ignore-scripts` skips `postinstall` for better-sqlite3 and sharp — native bindings aren't compiled, all DB calls throw 500.
+
+**Correct Dockerfile line (already in place, do not change):**
+```dockerfile
+RUN npm ci --omit=dev --ignore-scripts && npm rebuild better-sqlite3 sharp
+```
+
+---
+
+## 5. Fail-close startup in production
+
+In `NODE_ENV=production` the server calls `process.exit(1)` on startup if any of these are missing: `ENCRYPTION_KEY`, `MASTER_CODE`, `VAPID_PUBLIC`, `VAPID_PRIVATE`.
+
+This is intentional. If the server won't start, check `.env` — do not remove the check.
+
+---
+
+## 6. git safe.directory on Windows UNC path
+
+If git commands fail with "dubious ownership":
+```bash
+git config --global --add safe.directory "//MedSkin/docker/w0pium"
+```
+
+---
+
+## 7. General security rules
+
+- No SQL string interpolation — always use parameterized queries
+- No stack traces in production — global error handler suppresses them
+- Passwords hashed with bcryptjs cost factor 10
+- Sessions: random UUID token in `httpOnly` cookie
+- Banned users: kicked from active sessions immediately by `auth` middleware

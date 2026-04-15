@@ -1,0 +1,17 @@
+# Optional local override — Docker Compose merges this with docker-compose.yml
+# when the file is named docker-compose.override.yml next to docker-compose.yml.
+#
+# Setup:
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+# (docker-compose.override.yml is gitignored.)
+#
+# Effect: host ./public is mounted read-only at /app/public so you can change
+# CSS/JS on disk and restart the container only — no image rebuild. Do NOT use
+# on production NAS if you rely on `docker compose up --build` to publish UI.
+
+version: "3.8"
+
+services:
+  w0pium:
+    volumes:
+      - ./public:/app/public:ro

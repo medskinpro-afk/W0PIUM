@@ -1,0 +1,109 @@
+---
+description: W0PIUM project overview — stack, file structure, protected data. Always loaded.
+alwaysApply: true
+---
+
+# W0PIUM — Project Overview
+
+Private invite-only social network. Live at https://w0pium.walfir.com
+Hosted on Synology NAS via Docker + Cloudflare Tunnel.
+Repo: `\\MedSkin\docker\w0pium\`
+
+## Stack
+
+| Layer     | Tech                                                        |
+|-----------|-------------------------------------------------------------|
+| Backend   | Node.js 20 / Express 4 — single file `server.js` (~2500+ lines) |
+| Database  | better-sqlite3 (synchronous SQLite, no ORM)                 |
+| Frontend  | Vanilla JS SPA — no React, no TypeScript — single file `public/app.js` (~5000+ lines) |
+| Realtime  | Server-Sent Events (`/api/events`)                          |
+| Auth      | Session cookie (`httpOnly`, `sameSite: lax`)                |
+| Email     | Resend API via native `fetch()`                             |
+| Files     | Multer → local disk under `DATA_DIR/`                       |
+| PWA       | Web App Manifest + Service Worker                           |
+| Deploy    | Docker Compose + Cloudflare Tunnel (`w0pium-nas-2`)         |
+
+## Key Files
+
+```
+server.js                   # ALL backend: routes, DB logic, migrations
+public/app.js               # ALL frontend: router, pages, SSE client
+public/pages/chat.js        # Chat page (voice, media gallery, search)
+public/pages/drops.js       # Drops page (IntersectionObserver, views)
+public/style.css            # CSS vars (dark default) + .light overrides
+public/index.html           # SPA shell — one page, no framework
+data/w0pium.db              # SQLite DB (git-ignored, live data)
+.env                        # Secrets — never commit, never edit without confirmation
+docker-compose.yml          # Docker Compose config
+Dockerfile                  # Node 20 image, npm ci --omit=dev --ignore-scripts && npm rebuild
+```
+
+## Protected — Never Touch Without Explicit User Confirmation
+
+| Object          | Reason                        |
+|-----------------|-------------------------------|
+| `data/`         | Live DB, avatars, user files  |
+| `.env`          | API keys, VAPID, tunnel token |
+| User `wf`       | Admin account (owner)         |
+| User `vf`       | Test account                  |
+| User `616`      | Friend's account              |
+
+## Development Workflow
+
+```bash
+npm install
+cp .env.example .env   # fill in secrets
+
+npm start              # API server on :3000
+npm run dev            # Vite dev server on :5173 (proxies /api/* → :3000)
+npm run lint
+npm run format
+```
+
+For quick testing without Vite: open `http://localhost:3000` directly.
+Express serves `public/` as static; all Tailwind classes are present (no purging in dev).
+
+## Current Project Status
+
+**Fully working:**
+- Auth, profiles, follows, feed, drops
+- DM chats + group chats, voice messages
+- Disk (shared file storage), search, notifications, push (Web Push)
+- Admin panel, user verification, reports/complaints
+- PWA, link preview, reactions, polls, scheduled posts
+
+**Partially implemented (do not break):**
+- Hub / federation — page exists, distributed node logic not finished
+
+**Requires .env to work:**
+- Email verification + password reset → needs `RESEND_API_KEY`
+- Web Push → needs `VAPID_PUBLIC` + `VAPID_PRIVATE`
+
+## Frontend Utilities
+
+```js
+toast('message')             // default toast
+toast.success / .error / .loading / .promise
+window.cn('a', { b: true })  // clsx-style class names
+```
+
+Theme: dark default (`:root {}`), light override (`:root.light {}`).
+Toggle: `toggleTheme()` in `app.js` adds/removes `.light` on `<html>`.
+
+## PWA Service Worker (`public/service-worker.js`)
+
+- Static assets: **cache-first**
+- `/api/*` and `/disk/*`: **network-only** (never cached)
+- SPA shell (`index.html`): **network-first** with cache fallback
+
+## Commit Style
+
+```
+feat: add voice messages to group chats
+fix: poll vote not saved on mobile
+refactor: extract avatar upload helper
+style: update card hover state
+docs: update AGENTS.md deploy section
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+```

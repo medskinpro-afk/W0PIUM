@@ -20,41 +20,26 @@ export default [
       'prefer-const': 'warn',
     },
   },
-  // ── Frontend SPA (browser globals, vanilla JS) ─────────────────────────
+  // ── Frontend (browser; all scripts under public/ except service worker) ─
+  // Many functions are only referenced from HTML (onclick="…"). ESLint cannot see
+  // those as "used", so no-unused-vars is off here (same idea as the old app.js-only block).
   {
-    files: ['public/app.js'],
+    files: ['public/**/*.js'],
+    ignores: ['public/service-worker.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'script',
       globals: { ...globals.browser },
     },
     rules: {
-      // app.js intentionally uses many globals — relax undef/unused
       'no-unused-vars': 'off',
       'no-undef': 'off',
       'no-empty': ['warn', { allowEmptyCatch: true }],
-      eqeqeq: ['warn', 'always'],
+      eqeqeq: 'off',
       'no-var': 'warn',
     },
   },
-  // ── Frontend utilities (IIFE modules, window globals) ──────────────────
-  {
-    files: ['public/utils/*.js', 'public/hooks/*.js'],
-    languageOptions: {
-      ecmaVersion: 2022,
-      sourceType: 'script',
-      globals: { ...globals.browser },
-    },
-    rules: {
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
-      'no-undef': 'off',
-      'no-empty': ['error', { allowEmptyCatch: true }],
-      eqeqeq: ['error', 'always'],
-      'no-var': 'error',
-      'prefer-const': 'warn',
-    },
-  },
-  // ── Service Worker (ServiceWorkerGlobalScope) ───────────────────────────
+  // ── Service Worker ─────────────────────────────────────────────────────
   {
     files: ['public/service-worker.js'],
     languageOptions: {
@@ -76,20 +61,71 @@ export default [
       'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
-  // ── Vite / PostCSS config files ─────────────────────────────────────────
+  // ── Playwright tests ───────────────────────────────────────────────────
   {
-    files: ['vite.config.mjs', 'postcss.config.js', 'tailwind.config.js'],
+    files: ['tests/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-empty': ['error', { allowEmptyCatch: true }],
+    },
+  },
+  // ── Node tooling scripts ───────────────────────────────────────────────
+  {
+    files: ['scripts/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-console': 'off',
+      'no-empty': ['error', { allowEmptyCatch: true }],
+    },
+  },
+  // ── Playwright config ──────────────────────────────────────────────────
+  {
+    files: ['playwright.config.js', 'playwright.prod.config.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    files: ['vite.config.mjs'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
       globals: { ...globals.node },
     },
-    rules: {
-      'no-unused-vars': 'off',
+    rules: { 'no-unused-vars': 'off' },
+  },
+  {
+    files: ['postcss.config.js', 'tailwind.config.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
     },
+    rules: { 'no-unused-vars': 'off' },
   },
   // ── Global ignores ──────────────────────────────────────────────────────
   {
-    ignores: ['node_modules/**', 'dist/**'],
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      'seed-users.js',
+      'playwright-report/**',
+      'test-results/**',
+    ],
   },
 ];

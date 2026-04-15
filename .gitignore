@@ -15,6 +15,9 @@ data/
 .env.*
 !.env.example
 
+# ➤ Локальный docker-compose (bind-mount public/ и т.д.) — см. docker-compose.override.example.yml
+docker-compose.override.yml
+
 # ➤ Логи и синхронизация Synology
 logs.txt
 *.log
@@ -35,6 +38,10 @@ Thumbs.db
 
 # ➤ Файлы сидов/тестов
 seed-users.js
+
+# ➤ E2E test artifacts
+playwright-report/
+test-results/
 
 # ➤ Другие артефакты (добавляйте по необходимости)
 # beta-test.md

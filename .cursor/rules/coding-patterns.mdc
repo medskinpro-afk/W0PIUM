@@ -1,0 +1,122 @@
+---
+description: Coding patterns for server.js and app.js — DB helpers, routes, frontend pages, SSE, migrations.
+globs: ["server.js", "public/app.js", "public/pages/*.js"]
+alwaysApply: true
+---
+
+# W0PIUM — Coding Patterns
+
+## Database (better-sqlite3, synchronous)
+
+Three helpers defined at the top of `server.js` — use them everywhere:
+
+```js
+run(sql, params)   // INSERT / UPDATE / DELETE → returns RunResult
+get(sql, params)   // SELECT → single row object or null
+all(sql, params)   // SELECT → array of row objects
+```
+
+**CRITICAL — always single quotes for SQL string literals:**
+```js
+// ✅ correct
+get("SELECT * FROM posts WHERE content='' AND created_at > datetime('now','-1 day')", [])
+
+// ❌ breaks at runtime — SQLite treats "" as a column identifier
+get('SELECT * FROM posts WHERE content="" AND created_at > datetime("now")', [])
+```
+
+**Adding a column — never edit existing CREATE TABLE:**
+```js
+// Add to alterStatements array in main():
+'ALTER TABLE users ADD COLUMN new_field TEXT DEFAULT ""'
+// alterStatements.forEach(s => { try { db.exec(s); } catch {} });
+```
+
+**New table:**
+```js
+// Add inside main(), after existing CREATE TABLE statements:
+db.exec(`CREATE TABLE IF NOT EXISTS my_table (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+```
+
+## Backend Route
+
+```js
+// In server.js — BEFORE the catch-all app.get('*', ...)
+app.post('/api/something', auth, rateLimiter, async (req, res) => {
+  try {
+    run('INSERT INTO ...', [req.body.field]);
+    pushEvent(req.uid, 'event_name', { payload });
+    res.json({ ok: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+```
+
+Middleware:
+- `auth` — requires login, sets `req.uid` and `req.user`
+- `oAuth` — optional auth (sets `req.uid` if logged in, otherwise null)
+- `adminAuth` — admin only
+- Rate limiter: `rateLimit({ windowMs, max, keyGenerator: (r) => r.uid || r.ip })`
+
+## Frontend Page
+
+```js
+// In app.js:
+async function renderMyPage(app) {
+  app.innerHTML = `<div>...</div>`;
+  // attach event listeners here
+}
+
+// Add to routes object in go():
+mypage: () => renderMyPage(app),
+
+// Add to renderNav() items array if it needs a nav entry:
+{ id: 'mypage', label: '◎  Label', title: 'Tooltip text' },
+```
+
+Router: `go(page, param)` — call it to navigate programmatically.
+Every page is an async `render<Name>(appEl)` function.
+
+## SSE Real-time Events
+
+```js
+// Server (server.js):
+pushEvent(userId, 'my_event', { data: 'payload' });
+
+// Client (app.js → inside initEvents()):
+eventSrc.addEventListener('my_event', e => {
+  const data = JSON.parse(e.data);
+  // handle update
+});
+```
+
+## Security Checklist for New Routes
+
+- All SQL params must be parameterized — no string interpolation
+- User-triggered routes must have a rate limiter
+- File uploads: validate MIME type via multer; images ≤ 5 MB, files ≤ 4 GB
+- Use `await isSsrfBlocked(url)` before any outbound fetch (see gotchas)
+- Banned users are blocked by `auth` middleware automatically
+
+## Voice Recording (chat composer, inline in app.js)
+
+Three-state flow built directly into the chat composer:
+- **Idle** — `#voiceBtn` visible (🎙); click to start
+- **Recording** — `#voiceRecBar` shown: ✕ cancel | pulsing dot | timer | ⏹ stop
+- **Preview** — `#voicePreviewBar` shown: ✕ cancel | `<audio>` playback | ✓ send
+
+Key functions: `startRecording(cid)`, `stopRecordingPreview()`, `cancelRecording()`, `sendVoiceMessage(cid, blob, mime)`
+
+## CSS Conventions
+
+- Design tokens in `:root {}` in `style.css` — reference with `var(--name)`
+- Light theme overrides in `:root.light {}` — same variable names
+- No inline styles except dynamic values set by JS
+- Tailwind utilities can be used in HTML/JS templates

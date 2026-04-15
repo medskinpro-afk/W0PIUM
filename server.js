@@ -92,6 +92,11 @@ const limiterReact    = _rl({ windowMs: 60_000,  limit: 30, keyGenerator: req =>
 const limiterComment  = _rl({ windowMs: 60_000, limit: 20, keyGenerator: req => req.uid || req.ip, message: 'Слишком много комментариев' });
 const limiterLinkPreview = _rl({ windowMs: 60_000, limit: 20, keyGenerator: req => req.uid || req.ip });
 const limiterPostReact = _rl({ windowMs: 60_000, limit: 60, keyGenerator: req => req.uid || req.ip });
+const limiterProfileUpdate = _rl({ windowMs: 60_000, limit: 20, keyGenerator: req => req.uid || req.ip, message: 'Слишком много изменений профиля' });
+const limiterPasswordChange = _rl({ windowMs: 300_000, limit: 5, keyGenerator: req => req.uid || req.ip, message: 'Слишком много попыток смены пароля' });
+const limiterSessionManage = _rl({ windowMs: 60_000, limit: 30, keyGenerator: req => req.uid || req.ip });
+const limiterAccountDelete = _rl({ windowMs: 3_600_000, limit: 2, keyGenerator: req => req.uid || req.ip, message: 'Подожди немного перед повтором' });
+const limiterAvatarUpload = _rl({ windowMs: 60_000, limit: 10, keyGenerator: req => req.uid || req.ip, message: 'Слишком много загрузок аватара' });
 
 const PORT = process.env.PORT || 3000;
 const DATA = process.env.DATA_DIR || './data';
@@ -736,7 +741,7 @@ function main() {
     if (req.method === 'GET') return res.redirect('/');
     res.json({ ok:1 });
   };
-  app.post('/api/logout', auth, doLogout);
+  app.post('/api/logout', auth, limiterSessionManage, doLogout);
   app.get('/api/logout', doLogout);
 
   // SESSION MANAGEMENT
@@ -745,12 +750,12 @@ function main() {
     const currentToken = req.cookies.token || req.headers['x-token'];
     res.json(sessions.map(s => ({ ...s, is_current: s.token === currentToken, token: s.token.slice(0,8)+'...' })));
   });
-  app.delete('/api/sessions/others', auth, (req,res) => {
+  app.delete('/api/sessions/others', auth, limiterSessionManage, (req,res) => {
     const current = req.cookies.token || req.headers['x-token'];
     run('DELETE FROM sessions WHERE user_id=? AND token!=?', [req.uid, current]);
     res.json({ ok:1 });
   });
-  app.delete('/api/sessions/all', auth, (req,res) => {
+  app.delete('/api/sessions/all', auth, limiterSessionManage, (req,res) => {
     run('DELETE FROM sessions WHERE user_id=?', [req.uid]);
     res.clearCookie('token');
     res.json({ ok:1, logout:true });
@@ -765,7 +770,7 @@ function main() {
   });
 
   // PROFILE
-  app.put('/api/profile', auth, (req, res) => {
+  app.put('/api/profile', auth, limiterProfileUpdate, (req, res) => {
     const safeLink = u => { const s=(u||'').trim(); return (s&&s.startsWith('https://'))?s:''; };
     const { display_name,bio,is_private,dm_requests,show_read_receipts,show_typing } = req.body;
     const link_sc=safeLink(req.body.link_sc), link_ig=safeLink(req.body.link_ig),
@@ -775,7 +780,7 @@ function main() {
       [display_name||'',bio||'',link_sc,link_ig,link_tg,link_spotify,link_site,is_private?1:0,dm_requests?1:0,show_read_receipts?1:0,show_typing?1:0,req.uid]);
     res.json({ ok:1 });
   });
-  app.put('/api/password', auth, (req, res) => {
+  app.put('/api/password', auth, limiterPasswordChange, (req, res) => {
     const { old_password,new_password } = req.body||{};
     if (!old_password||!new_password) return res.status(400).json({ error:'Заполни все поля' });
     if (new_password.length<8) return res.status(400).json({ error:'Пароль должен быть не менее 8 символов' });
@@ -787,7 +792,7 @@ function main() {
     run('UPDATE users SET password=? WHERE id=?', [bcrypt.hashSync(new_password,10),req.uid]);
     res.json({ ok:1 });
   });
-  app.delete('/api/me', auth, (req, res) => {
+  app.delete('/api/me', auth, limiterAccountDelete, (req, res) => {
     cleanUserFiles(req.uid);
     run('DELETE FROM users WHERE id=?', [req.uid]);
     res.clearCookie('token'); res.json({ ok:1 });
@@ -797,7 +802,7 @@ function main() {
     run('UPDATE users SET invite_code=? WHERE id=?', [code, req.uid]);
     res.json({ ok:1, invite_code: code });
   });
-  app.post('/api/avatar', auth, avaUp.single('avatar'), async (req, res) => {
+  app.post('/api/avatar', auth, limiterAvatarUpload, avaUp.single('avatar'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error:'No file' });
     try {
       const nm = await processImage(req.file.path, AVA_DIR, { width: 400, height: 400, fit: 'cover' });
@@ -1591,7 +1596,7 @@ function main() {
   app.get('/api/chats', auth, (req, res) => {
     const convs=all(`SELECT c.id,c.is_group,c.title,c.owner,c.pinned_msg_id,c.avatar FROM conversations c JOIN conversation_members cm ON cm.conv_id=c.id WHERE cm.user_id=? ORDER BY (SELECT created_at FROM messages m WHERE m.conv_id=c.id ORDER BY m.created_at DESC LIMIT 1) DESC NULLS LAST, c.created_at DESC`,[req.uid]);
     const result=convs.map(c=>{
-      const members=all(`SELECT u.id,u.username,u.display_name,u.avatar FROM conversation_members cm JOIN users u ON cm.user_id=u.id WHERE cm.conv_id=?`,[c.id]);
+      const members=all(`SELECT u.id,u.username,u.display_name,u.avatar,u.last_seen FROM conversation_members cm JOIN users u ON cm.user_id=u.id WHERE cm.conv_id=?`,[c.id]);
       const last=get(`SELECT m.id,m.sender_id,m.content,m.file,m.file_type,m.edited_at,m.deleted_at,m.created_at,u.username,u.display_name FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.conv_id=? ORDER BY m.created_at DESC LIMIT 1`,[c.id]);
       const lr=get('SELECT last_read,accepted,muted_until FROM conversation_members WHERE conv_id=? AND user_id=?',[c.id,req.uid]);
       const unread=lr?get('SELECT COUNT(*) AS c FROM messages WHERE conv_id=? AND datetime(created_at)>datetime(?) AND deleted_at IS NULL',[c.id,lr.last_read]).c:0;
@@ -1599,10 +1604,7 @@ function main() {
       let other_last_seen = null;
       if (!c.is_group) {
         const otherMember = members.find(m => m.id !== req.uid);
-        if (otherMember) {
-          const otherUser = get('SELECT last_seen FROM users WHERE id=?', [otherMember.id]);
-          other_last_seen = otherUser?.last_seen || null;
-        }
+        if (otherMember) other_last_seen = otherMember.last_seen || null;
       }
       return { id:c.id, is_group:!!c.is_group, title:c.title, members, last, unread, my_accepted, pinned_msg_id: c.pinned_msg_id || null, muted_until: lr?.muted_until || null, other_last_seen, avatar: c.avatar || '' };
     });
@@ -2061,15 +2063,19 @@ function main() {
 
   app.get('/api/hub/external', adminAuth, async (req, res) => {
     const platforms = ['vk','youtube','soundcloud','x','twitch','tiktok','instagram'];
+    const forceRefresh = req.query.refresh === '1';
     const keys = {};
     all('SELECT platform,api_key FROM hub_api_keys').forEach(r => { keys[r.platform] = r.api_key; });
     const result = {};
     await Promise.all(platforms.map(async p => {
       const cached = hubStatsCache[p];
-      if (cached && Date.now() - cached.ts < HUB_CACHE_TTL) { result[p] = cached.data; return; }
+      if (!forceRefresh && cached && Date.now() - cached.ts < HUB_CACHE_TTL) {
+        result[p] = { data: cached.data, cached: true, updated_at: new Date(cached.ts).toISOString() };
+        return;
+      }
       const data = await fetchPlatformStats(p, keys[p] || '');
       hubStatsCache[p] = { data, ts: Date.now() };
-      result[p] = data;
+      result[p] = { data, cached: false, updated_at: new Date(hubStatsCache[p].ts).toISOString() };
     }));
     res.json(result);
   });
@@ -2243,7 +2249,6 @@ function main() {
   });
 
   // ── DISK ──
-  const DISK_ALLOWED_MIME = /^(audio|video|image)\//i;
   const DISK_ALLOWED_EXT = new Set(['.mp3','.wav','.flac','.aac','.ogg','.m4a','.opus',
     '.mp4','.mov','.webm','.mkv','.avi',
     '.jpg','.jpeg','.png','.gif','.webp','.svg',
@@ -2407,7 +2412,7 @@ function main() {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="w0pium-files.zip"');
     const arc = archiver('zip', { zlib: { level: 0 } });
-    arc.on('error', err => { if (!res.headersSent) res.status(500).end(); else res.end(); });
+    arc.on('error', _err => { if (!res.headersSent) res.status(500).end(); else res.end(); });
     arc.pipe(res);
     files.forEach(f => {
       const filePath = p.join(DATA, f.path.replace(/^\/disk\//, 'disk/'));
@@ -2447,7 +2452,7 @@ function main() {
 
   app.use('/disk', auth, express.static(DISK_DIR));
 
-  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'security-audit-fixes' }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'rate-limiters-css-refactor' }));
 
   app.get('*', (req,res) => res.sendFile(p.join(__dirname,'public','index.html')));
   // Global error handler — never expose stack traces to clients
