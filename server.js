@@ -2256,7 +2256,10 @@ function main() {
     '.csv','.tsv','.json','.xml','.yaml','.yml',
     '.xlsx','.xls','.numbers',
     '.docx','.doc','.pages',
-    '.pptx','.ppt','.key']);
+    '.pptx','.ppt','.key',
+    '.odt','.ods','.odp','.rtf',
+    '.sql','.log','.ini','.cfg','.conf',
+    '.bsl','.erf','.epf','.dt']);
   const diskUp = multer({
     dest: DISK_DIR,
     limits: { fileSize: 4*1024*1024*1024 },
