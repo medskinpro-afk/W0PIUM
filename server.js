@@ -2252,7 +2252,11 @@ function main() {
   const DISK_ALLOWED_EXT = new Set(['.mp3','.wav','.flac','.aac','.ogg','.m4a','.opus',
     '.mp4','.mov','.webm','.mkv','.avi',
     '.jpg','.jpeg','.png','.gif','.webp','.svg',
-    '.pdf','.txt','.md','.zip','.rar']);
+    '.pdf','.txt','.md','.zip','.rar','.7z','.tar','.gz',
+    '.csv','.tsv','.json','.xml','.yaml','.yml',
+    '.xlsx','.xls','.numbers',
+    '.docx','.doc','.pages',
+    '.pptx','.ppt','.key']);
   const diskUp = multer({
     dest: DISK_DIR,
     limits: { fileSize: 4*1024*1024*1024 },
