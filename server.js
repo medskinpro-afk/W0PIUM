@@ -2459,7 +2459,7 @@ function main() {
 
   app.use('/disk', auth, express.static(DISK_DIR));
 
-  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'rate-limiters-css-refactor' }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'disk-file-types' }));
 
   app.get('*', (req,res) => res.sendFile(p.join(__dirname,'public','index.html')));
   // Global error handler — never expose stack traces to clients
