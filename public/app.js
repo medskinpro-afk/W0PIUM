@@ -1382,6 +1382,7 @@ function go(p, param, _hist = 'push') {
     profile: () => renderProfile(app, param),
     settings: () => renderSettings(app),
     notifs: () => renderNotifs(app),
+    notifications: () => renderNotifs(app),
     login: () => renderAuth(app, 'login'),
     register: () => renderAuth(app, 'register'),
     chats: () => renderChats(app),
@@ -2806,6 +2807,7 @@ async function renderProfile(app, username) {
     const archivedPosts = isMe ? allPosts.filter(p => p.archived && !p.repost_of) : [];
 
     app.innerHTML = `
+      ${opiumCommandStrip('')}
       <div class="profile-top">
         ${isMe ? `
           <div class="avatar avatar-lg profile-ava-wrap" data-post-action="profile-avatar-pick">
@@ -2921,6 +2923,7 @@ async function renderSettings(app) {
   let u;
   try { u = await api('/me'); } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   app.innerHTML = `
+    ${opiumCommandStrip('')}
     ${pageTitleIc('settings', 'НАСТРОЙКИ')}
     <div class="settings">
 
@@ -3237,9 +3240,9 @@ async function renderNotifs(app) {
   let notifs;
   try { notifs = await api('/notifications'); } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   me.notif_count = 0; renderNav();
-  if (!notifs.length) { app.innerHTML = `${pageTitleIc('notifications', 'УВЕДОМЛЕНИЯ', 16, 16)}<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('notifications', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Всё тихо</div><div class="onboarding-text">Здесь будут лайки, комментарии и новые подписчики</div></div>`; return; }
+  if (!notifs.length) { app.innerHTML = `${opiumCommandStrip('')}${pageTitleIc('notifications', 'УВЕДОМЛЕНИЯ', 16, 16)}<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('notifications', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Всё тихо</div><div class="onboarding-text">Здесь будут лайки, комментарии и новые подписчики</div></div>`; return; }
 
-  const typeMap = { like: '♥ лайкнул пост', comment: '🥀 прокомментировал', follow: '→ подписался', repost: '↻ репостнул', dm: '✦ прислал сообщение', follow_request: 'хочет подписаться на тебя' };
+  const typeMap = { like: '♥ лайкнул пост', comment: '◈ прокомментировал', follow: '→ подписался', repost: '↻ репостнул', dm: '✦ прислал сообщение', follow_request: 'хочет подписаться на тебя' };
   // Aggregate DM notifications: one entry per conversation
   const seen = new Set();
   const dedupedNotifs = notifs.filter(n => {
@@ -3250,6 +3253,7 @@ async function renderNotifs(app) {
     return true;
   });
   app.innerHTML = `
+    ${opiumCommandStrip('')}
     ${pageTitleIc('notifications', 'УВЕДОМЛЕНИЯ', 16, 16)}
     ${dedupedNotifs.map(n => `
       <div class="artist-row" data-post-action="${n.type==='dm' && n.ref_id ? 'go-chat' : 'go-profile'}" data-conv-id="${esc(n.ref_id || '')}" data-username="${esc(n.username || '')}" style="cursor:pointer">

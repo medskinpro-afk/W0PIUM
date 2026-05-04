@@ -2700,7 +2700,7 @@ function main() {
 
   app.use('/disk', auth, express.static(DISK_DIR));
 
-  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'drops-nav-fix' }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'nav-strip-secondary-pages' }));
 
   app.get('*', (req,res) => res.sendFile(p.join(__dirname,'public','index.html')));
   // Global error handler — never expose stack traces to clients
