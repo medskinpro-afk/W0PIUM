@@ -496,11 +496,11 @@ async function loadChats() {
       const app = document.getElementById('app');
       const accepted = chats.filter(c => c.my_accepted !== false);
       const pending = chatListShowArchived ? [] : chats.filter(c => c.my_accepted === false);
-      let html = `${opiumCommandStrip('chats')}${opiumMetricCards([
+      let html = `${opiumCommandStrip('chats')}<div class="page-title-row"><span class="page-title page-title--ic">${iconCut('comment', 'ui-icon page-title-ic', 15, 15)}DM</span><div class="page-title-actions"><button class="btn btn-sm btn-ghost btn-ic-pad${chatListShowArchived ? ' active' : ''}" data-post-action="toggle-chat-list-archive" title="Архив">${iconCut('disk', 'ui-icon', 15, 15)} АРХИВ</button><button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="show-create-group-modal" title="Новая группа">${iconCut('add', 'ui-icon', 15, 15)} ГРУППА</button></div></div>${opiumMetricCards([
         { label: 'dialogs', value: accepted.length, note: 'active threads' },
         { label: 'requests', value: pending.length, note: 'pending inbox' },
         { label: 'archive', value: chatListShowArchived ? 'open' : 'hidden', note: 'stored chats' },
-      ])}<div class="page-title-row"><span class="page-title page-title--ic">${iconCut('comment', 'ui-icon page-title-ic', 15, 15)}DM</span><div class="page-title-actions"><button class="btn btn-sm btn-ghost btn-ic-pad${chatListShowArchived ? ' active' : ''}" data-post-action="toggle-chat-list-archive" title="Архив">${iconCut('disk', 'ui-icon', 15, 15)} АРХИВ</button><button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="show-create-group-modal" title="Новая группа">${iconCut('add', 'ui-icon', 15, 15)} ГРУППА</button></div></div>`;
+      ])}`;
       if (!chatListShowArchived && pending.length) {
         html += `<div class="dm-section-title">ЗАПРОСЫ (${pending.length})</div>` + pending.map(chatRow).join('');
       }
@@ -2603,6 +2603,7 @@ async function renderSearch(app, initQuery) {
   let recentSearches = [];
   const searchCoreHeader = `
     ${opiumCommandStrip('search')}
+    ${pageTitleIc('search', 'ПОИСК')}
     ${opiumMetricCards([
       { label: 'scope', value: 'all', note: 'users, posts, dm, files' },
       { label: 'keys', value: 'up/down', note: 'keyboard navigation' },
@@ -2619,7 +2620,6 @@ async function renderSearch(app, initQuery) {
   };
   app.innerHTML = `
     ${searchCoreHeader}
-    ${pageTitleIc('search', 'ПОИСК')}
     <div class="search-bar">
       <input class="input" id="searchInput" placeholder="Введи запрос..." value="${esc(initQuery||'')}" autocomplete="off" autocorrect="off" spellcheck="false">
     </div>
@@ -6980,13 +6980,13 @@ async function renderDisk(app) {
   diskSelectedIds.clear();
   app.innerHTML = `
     ${opiumCommandStrip('disk')}
+    ${pageTitleIc('disk', 'DISK')}
     ${opiumMetricCards([
       { label: 'mode', value: diskView, note: 'grid/list' },
       { label: 'select', value: 'bulk', note: 'zip or delete' },
       { label: 'share', value: 'links', note: 'publish files' },
     ])}
     <div class="disk-header">
-      <h2 class="disk-title">Диск</h2>
       <div class="disk-header-right">
         <button class="btn btn-sm btn-ic-row" data-post-action="disk-create-folder">${iconCut('add', 'ui-icon', 14, 14)}Папка</button>
         <button class="btn btn-sm btn-ic-row" data-post-action="disk-open-upload">${iconCut('upload', 'ui-icon', 14, 14)}Загрузить</button>
