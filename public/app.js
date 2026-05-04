@@ -1,5 +1,5 @@
 // ── VERSION ──
-const APP_VERSION = '0.9.9';
+const APP_VERSION = '0.9.16';
 
 // ── IMAGE LIGHTBOX ──
 function openImg(src) {
@@ -99,6 +99,87 @@ let pageParam = null;
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+const ICON_CUT = '/icons_cut';
+/** PNG from /icons_cut/{name}.png — filenames are allowlisted alphanumeric + hyphen */
+function iconCut(name, cls = 'ui-icon', w = 20, h = 20) {
+  const safe = String(name).replace(/[^a-z0-9-]/gi, '');
+  return `<img class="${esc(cls)}" src="${ICON_CUT}/${safe}.png" alt="" width="${w}" height="${h}" decoding="async" aria-hidden="true">`;
+}
+function likeIconHtml(liked, w = 16, h = 16) {
+  return iconCut(liked ? 'like-filled' : 'like', 'ui-icon', w, h);
+}
+function bookmarkIconHtml(bookmarked, w = 16, h = 16) {
+  return iconCut(bookmarked ? 'bookmark-filled' : 'bookmark', 'ui-icon', w, h);
+}
+function playPauseIconHtml(playing, w = 16, h = 16) {
+  return iconCut(playing ? 'pause' : 'play', 'ui-icon', w, h);
+}
+/** DM read receipts (delivered / read) */
+function msgTickIcons(isRead) {
+  const one = iconCut('check', 'ui-icon msg-tick-ic', 10, 10);
+  return isRead ? `<span class="msg-tick-icons">${one}${one}</span>` : `<span class="msg-tick-icons">${one}</span>`;
+}
+/** Centered page heading with icons_cut (text is escaped). */
+function pageTitleIc(icon, text, iw = 15, ih = 15) {
+  return `<div class="page-title page-title--ic">${iconCut(icon, 'ui-icon page-title-ic', iw, ih)}${esc(text)}</div>`;
+}
+/** Same as pageTitleIc but trailing HTML is already safe (e.g. escaped fragments). */
+function pageTitleIcRaw(icon, htmlAfterIcon, iw = 15, ih = 15) {
+  return `<div class="page-title page-title--ic">${iconCut(icon, 'ui-icon page-title-ic', iw, ih)}${htmlAfterIcon}</div>`;
+}
+
+function opiumCoreHero(mode = 'feed') {
+  const authed = !!me;
+  const eyebrow = authed ? `@${esc(me.username || 'w0pium')}` : 'invite-only / opium core';
+  const title = mode === 'auth' ? 'WOPIUM' : 'CORE';
+  const copy = authed
+    ? 'private feed, direct messages, drops and disk in one quiet place.'
+    : 'closed social space for posts, drops, chats and files. minimal, invite-only, signal over noise.';
+  const actions = authed
+    ? `<button class="btn btn-sm btn-ic-row" data-post-action="go-chats">${iconCut('comment', 'ui-icon', 14, 14)}DM</button>
+       <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-disk">${iconCut('disk', 'ui-icon', 14, 14)}DISK</button>
+       <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-discover">${iconCut('search', 'ui-icon', 14, 14)}DISCOVER</button>`
+    : `<button class="btn btn-sm btn-ic-row" data-post-action="go-register">${iconCut('add', 'ui-icon', 14, 14)}SIGN UP</button>
+       <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-login">${iconCut('lock', 'ui-icon', 14, 14)}LOGIN</button>`;
+  return `
+    <section class="opium-hero opium-hero--${esc(mode)}">
+      <div class="opium-hero-mark">W<span class="logo-zero">Ø</span></div>
+      <div class="opium-hero-body">
+        <div class="opium-kicker">${eyebrow}</div>
+        <h1>${title}</h1>
+        <p>${copy}</p>
+        <div class="opium-hero-actions">${actions}</div>
+      </div>
+    </section>`;
+}
+
+function opiumCommandStrip(active = '') {
+  const items = [
+    ['feed', 'home', 'Feed', 'go-feed'],
+    ['chats', 'comment', 'DM', 'go-chats'],
+    ['discover', 'search', 'Discover', 'go', 'discover'],
+    ['drops', 'media', 'Drops', 'go', 'drops'],
+    ['disk', 'disk', 'Disk', 'go-disk'],
+    ['search', 'search', 'Search', 'go', 'search'],
+  ];
+  return `<div class="opium-command-strip">${items.map(([id, icon, label, action, navPage]) =>
+    `<button class="opium-command${active === id ? ' active' : ''}" data-post-action="${action}"${navPage ? ` data-nav-target="${navPage}"` : ''}>${iconCut(icon, 'ui-icon', 13, 13)}<span>${label}</span></button>`
+  ).join('')}</div>`;
+}
+
+function opiumMetricCards(cards) {
+  return `<div class="opium-metric-grid">${cards.map(c => `
+    <div class="opium-metric-card">
+      <span>${esc(c.label)}</span>
+      <strong>${esc(String(c.value))}</strong>
+      <em>${esc(c.note || '')}</em>
+    </div>`).join('')}</div>`;
+}
+/** Nav / toolbar: icon + text */
+function navInner(iconName, text, iw = 14, ih = 14) {
+  if (!iconName) return esc(text);
+  return `<span class="nav-item-inner">${iconCut(iconName, 'nav-icon-img', iw, ih)}<span class="nav-item-text">${esc(text)}</span></span>`;
+}
 const sameId = (a, b) => String(a ?? '') === String(b ?? '');
 // Safe URL helper to prevent javascript: URI injection
 // Accepts only http and https schemes. Returns '#' for invalid or unsafe URLs.
@@ -115,11 +196,98 @@ let msgPoll = null;
 let lastMsgTime = '';
 let eventSrc = null;
 let chatsCache = [];
+let chatListShowArchived = false;
 let currentChatId = null;
 let chatOtherLastRead = null;
 let typingTimer = null;
 let replyToMsg = null; // { id, text }
 let chatPinnedMsg = null;
+let realtimeDisconnected = false;
+let chatSidebarFilters = { unread: false, muted: false, pinned: false, archived: false };
+let pendingChatQueue = [];
+const CHAT_VIRTUAL_WINDOW = 180;
+const CHAT_VIRTUAL_CHUNK = 120;
+
+try {
+  pendingChatQueue = JSON.parse(localStorage.getItem('pending_chat_queue') || '[]');
+  if (!Array.isArray(pendingChatQueue)) pendingChatQueue = [];
+} catch { pendingChatQueue = []; }
+
+function persistPendingChatQueue() {
+  try { localStorage.setItem('pending_chat_queue', JSON.stringify(pendingChatQueue.slice(-50))); } catch {}
+}
+
+function chatIsMuted(c) {
+  return !!(c?.muted_until && new Date(c.muted_until) > new Date());
+}
+
+function chatIsPinned(c) {
+  return !!(c?.pinned_at);
+}
+
+function sortChatsForSidebar(list = []) {
+  return [...list].sort((a, b) => {
+    const ap = chatIsPinned(a) ? 1 : 0;
+    const bp = chatIsPinned(b) ? 1 : 0;
+    if (ap !== bp) return bp - ap;
+    const at = new Date(a?.last?.created_at || a?.updated_at || 0).getTime();
+    const bt = new Date(b?.last?.created_at || b?.updated_at || 0).getTime();
+    return bt - at;
+  });
+}
+
+function updateRealtimeStatus(disconnected) {
+  realtimeDisconnected = !!disconnected;
+  const bar = document.getElementById('realtimeStatusBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !realtimeDisconnected);
+  if (realtimeDisconnected) {
+    bar.textContent = 'Плохое соединение: переподключаем realtime...';
+  } else if (pendingChatQueue.length) {
+    bar.textContent = `В очереди: ${pendingChatQueue.length} сообщ. (клик: отправить)`;
+    bar.classList.remove('hidden');
+  }
+}
+
+function setComposerStatus(text = '', kind = '') {
+  const nameEl = document.getElementById('msgFileName');
+  if (!nameEl) return;
+  nameEl.textContent = text;
+  nameEl.classList.remove('status-ok', 'status-err', 'status-pending');
+  if (kind === 'ok') nameEl.classList.add('status-ok');
+  if (kind === 'err') nameEl.classList.add('status-err');
+  if (kind === 'pending') nameEl.classList.add('status-pending');
+}
+
+function updateChatSendReady() {
+  const sendBtn = document.getElementById('msgSendBtn');
+  if (!sendBtn) return;
+  const hasText = !!document.getElementById('msgText')?.value.trim();
+  const hasFile = !!(document.getElementById('msgImgFile')?.files?.[0] || document.getElementById('msgFile')?.files?.[0]);
+  sendBtn.classList.toggle('is-ready', hasText || hasFile);
+}
+
+function sendMessageWithProgress(cid, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/chats/${cid}/messages`);
+    if (csrfToken) xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable && typeof onProgress === 'function') {
+        const p = Math.round((e.loaded / e.total) * 100);
+        onProgress(p);
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || 'Error'));
+    };
+    xhr.send(formData);
+  });
+}
 
 // ── THEME ──
 function applyTheme(theme) {
@@ -182,6 +350,9 @@ function initEvents() {
     try { eventSrc.close(); } catch {}
   }
   eventSrc = new EventSource('/api/events');
+  eventSrc.onopen = () => {
+    updateRealtimeStatus(false);
+  };
   eventSrc.addEventListener('message', async e => {
     const data = JSON.parse(e.data);
     // If we are currently viewing this chat, append message
@@ -244,7 +415,7 @@ function initEvents() {
   });
   eventSrc.addEventListener('new_report', async () => {
     if (page === 'admin') loadAdminTab();
-    if (me?.is_admin) toast(`⚑ Новая жалоба`);
+    if (me?.is_admin) toast('Новая жалоба');
   });
   eventSrc.addEventListener('notif', () => {
     if (me) { me.notif_count = (me.notif_count || 0) + 1; renderNav(); }
@@ -263,7 +434,7 @@ function initEvents() {
   eventSrc.addEventListener('verify_approved', async e => {
     const data = JSON.parse(e.data);
     me = await api('/me'); csrfToken = me.csrf_token || ''; renderNav();
-    toast.success(`Верификация одобрена${data.badge_type ? ': ' + data.badge_type : ''} ✓`);
+    toast.success(`Верификация одобрена${data.badge_type ? ': ' + data.badge_type : ''}`);
   });
   eventSrc.addEventListener('verify_rejected', e => {
     const data = JSON.parse(e.data);
@@ -303,10 +474,11 @@ function initEvents() {
   eventSrc.addEventListener('mention', e => {
     const data = JSON.parse(e.data);
     if (data.conv_id !== currentChatId) {
-      toast('💬 Тебя упомянули');
+      toast('Тебя упомянули в чате');
     }
   });
   eventSrc.onerror = () => {
+    updateRealtimeStatus(true);
     eventSrc.close();
     eventSrc = null;
     setTimeout(initEvents, 3000);
@@ -318,17 +490,21 @@ function initEvents() {
  */
 async function loadChats() {
   try {
-    const chats = await api('/chats');
+    const chats = await api(chatListShowArchived ? '/chats?archived=1' : '/chats');
     chatsCache = chats;
     if (page === 'chats') {
       const app = document.getElementById('app');
       const accepted = chats.filter(c => c.my_accepted !== false);
-      const pending = chats.filter(c => c.my_accepted === false);
-      let html = `<div class="page-title-row"><span class="page-title">DM</span><button class="btn btn-sm btn-ghost" onclick="showCreateGroupModal()">+ ГРУППА</button></div>`;
-      if (pending.length) {
+      const pending = chatListShowArchived ? [] : chats.filter(c => c.my_accepted === false);
+      let html = `${opiumCommandStrip('chats')}${opiumMetricCards([
+        { label: 'dialogs', value: accepted.length, note: 'active threads' },
+        { label: 'requests', value: pending.length, note: 'pending inbox' },
+        { label: 'archive', value: chatListShowArchived ? 'open' : 'hidden', note: 'stored chats' },
+      ])}<div class="page-title-row"><span class="page-title page-title--ic">${iconCut('comment', 'ui-icon page-title-ic', 15, 15)}DM</span><div class="page-title-actions"><button class="btn btn-sm btn-ghost btn-ic-pad${chatListShowArchived ? ' active' : ''}" data-post-action="toggle-chat-list-archive" title="Архив">${iconCut('disk', 'ui-icon', 15, 15)} АРХИВ</button><button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="show-create-group-modal" title="Новая группа">${iconCut('add', 'ui-icon', 15, 15)} ГРУППА</button></div></div>`;
+      if (!chatListShowArchived && pending.length) {
         html += `<div class="dm-section-title">ЗАПРОСЫ (${pending.length})</div>` + pending.map(chatRow).join('');
       }
-      html += accepted.length ? accepted.map(chatRow).join('') : '<div class="empty">Нет диалогов</div>';
+      html += accepted.length ? accepted.map(chatRow).join('') : `<div class="empty">${chatListShowArchived ? 'Архив пуст' : 'Нет диалогов'}</div>`;
       app.innerHTML = html;
     } else {
       renderNav();
@@ -342,6 +518,7 @@ async function loadChats() {
 function appendMessage(m) {
   const cont = document.getElementById('chatMsgs');
   if (!cont) return;
+  if (Array.isArray(window._chatAllMsgs)) window._chatAllMsgs.push(m);
   const lastEl = [...cont.querySelectorAll('.msg[data-id]')].pop();
   const prev = lastEl
     ? { sender_id: lastEl.dataset.sender, deleted_at: null, created_at: lastEl.dataset.created }
@@ -357,8 +534,9 @@ function appendMessage(m) {
     const btn = document.getElementById('scrollDownBtn');
     if (btn) {
       btn.classList.remove('hidden');
-      const cur = parseInt(btn.textContent.replace(/\D/g, '')) || 0;
-      btn.innerHTML = `↓ ${cur + 1}`;
+      const badge = btn.querySelector('.scroll-down-badge');
+      const cur = badge ? parseInt(badge.textContent, 10) || 0 : 0;
+      btn.innerHTML = `${iconCut('back', 'ui-icon ui-icon--scroll-rot', 18, 18)}<span class="scroll-down-badge">${cur + 1}</span>`;
     }
   }
 }
@@ -397,7 +575,7 @@ function updateMessage(mid, content, edited_at) {
   let timeLabel = formatChatMsgTime(created || edited_at) + ' · изм.';
   if (el.classList.contains('me')) {
     const isRead = chatOtherLastRead && new Date(chatOtherLastRead) >= new Date(el.dataset.created || 0);
-    parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}<span class="msg-tick${isRead ? ' read' : ''}">${isRead ? '✓✓' : '✓'}</span></div>`);
+    parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}<span class="msg-tick${isRead ? ' read' : ''}">${msgTickIcons(isRead)}</span></div>`);
   } else {
     parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}</div>`);
   }
@@ -425,11 +603,11 @@ function startEditMsg(mid, cid) {
   const body = el.querySelector('.msg-body');
   const bar = body.querySelector('.reaction-bar');
   body.innerHTML = `
-    <div class="msg-edit-wrap">
+      <div class="msg-edit-wrap">
       <input class="input msg-edit-input" id="editInput-${mid}" value="${esc(current)}">
       <div class="msg-edit-actions">
-        <button class="btn-ghost" onclick="cancelEditMsg('${mid}')">ОТМЕНА</button>
-        <button class="btn btn-sm" onclick="submitEditMsg('${mid}','${cid}')">✓</button>
+        <button class="btn-ghost" data-post-action="cancel-edit-msg" data-msg-id="${mid}" aria-label="Отмена">${iconCut('close', 'ui-icon', 16, 16)}</button>
+        <button class="btn btn-sm" data-post-action="submit-edit-msg" data-msg-id="${mid}" data-conv-id="${cid}" aria-label="Сохранить">${iconCut('check', 'ui-icon', 16, 16)}</button>
       </div>
     </div>
   `;
@@ -587,7 +765,7 @@ function showPwaHint() {
   const hint = document.createElement('span');
   hint.id = 'pwaHint';
   hint.className = 'pwa-hint';
-  hint.textContent = '↓ INSTALL';
+  hint.textContent = 'DN INSTALL';
   hint.title = 'Установить приложение';
   hint.onclick = async () => {
     if (!_pwaPrompt) return;
@@ -601,6 +779,9 @@ function showPwaHint() {
 
 // ── INIT ──
 async function init() {
+  document.querySelectorAll('.msg-menu-overlay').forEach(el => el.remove());
+  closeMsgMenuPopover();
+  initUiDelegates();
   // inject link preview styles
   if (!document.getElementById('lp-styles')) {
     const s = document.createElement('style');
@@ -631,7 +812,20 @@ async function init() {
   }
   if (me) go(_startPage, _startParam, 'replace');
   else go('login', null, 'replace');
+  document.addEventListener('click', e => {
+    const bar = e.target.closest('#realtimeStatusBar');
+    if (bar && pendingChatQueue.length) {
+      flushPendingChatQueue().catch(() => {});
+    }
+  });
   if (me) initEvents();
+  window.addEventListener('online', () => {
+    updateRealtimeStatus(false);
+    flushPendingChatQueue().catch(() => {});
+  });
+  window.addEventListener('offline', () => {
+    updateRealtimeStatus(true);
+  });
   window.addEventListener('popstate', e => {
     const _s = e.state;
     if (_s?.p) { go(_s.p, _s.param || undefined, 'none'); return; }
@@ -662,40 +856,49 @@ function renderNav() {
   const mob = $('#mobileMenu');
   let items;
   if (me) {
-    const badge = me.notif_count > 0 ? `(${me.notif_count})` : '';
+    const badge = me.notif_count > 0 ? ` <span class="nav-badge">${me.notif_count}</span>` : '';
     items = [
-      { id: 'feed',     label: '⬡  Лента',         title: 'Посты твоих подписок' },
-      { id: 'drops',    label: '◎  Дропы',          title: 'Исчезают через 24ч' },
-      { id: 'discover', label: '◈  Обзор',          title: 'Все посты' },
-      { id: 'artists',  label: '⬟  Артисты',        title: 'Все пользователи' },
-      { id: 'disk',     label: '⬡  Диск',           title: 'Облачное хранилище' },
-      ...(me.is_admin ? [{ id: 'hub', label: '◆  Hub', title: 'Метрики и платформы' }] : []),
+      { id: 'feed',     html: navInner('home', 'Лента'),         title: 'Посты твоих подписок' },
+      { id: 'drops',    html: navInner('media', 'Дропы'),          title: 'Исчезают через 24ч' },
+      { id: 'discover', html: navInner('search', 'Обзор'),          title: 'Все посты' },
+      { id: 'artists',  html: navInner('profile', 'Артисты'),        title: 'Все пользователи' },
+      { id: 'disk',     html: navInner('disk', 'Диск'),           title: 'Облачное хранилище' },
+      ...(me.is_admin ? [{ id: 'hub', html: navInner('settings', 'Hub'), title: 'Метрики и платформы' }] : []),
       { sep: true },
-      { id: 'chats',    label: `◎  Чаты${me.unread_chats > 0 ? ` <span class="nav-badge">${me.unread_chats}</span>` : ''}`, title: 'Личные сообщения' },
-      { id: 'notifs',   label: `◈  Уведомления${badge}`, title: 'Уведомления' },
-      { id: 'search',   label: '○  Поиск',          title: 'Поиск' },
+      { id: 'chats',    html: `${navInner('comment', 'Чаты')}${me.unread_chats > 0 ? ` <span class="nav-badge">${me.unread_chats}</span>` : ''}`, title: 'Личные сообщения' },
+      { id: 'notifs',   html: `${navInner('notifications', 'Уведомления')}${badge}`, title: 'Уведомления' },
+      { id: 'search',   html: navInner('search', 'Поиск'),          title: 'Поиск' },
       { sep: true },
-      { id: 'profile',  label: `◆  ${me.display_name}`, param: me.username, title: 'Мой профиль' },
-      { id: 'settings', label: '○  Настройки',      title: 'Настройки профиля' },
+      { id: 'profile',  html: `${navInner('profile', me.display_name || 'Профиль')}`, param: me.username, title: 'Мой профиль' },
+      { id: 'settings', html: navInner('settings', 'Настройки'),      title: 'Настройки профиля' },
       { sep: true },
-      { id: '__theme', label: `${document.documentElement.classList.contains('light') ? '◑' : '◐'} ТЕМА`, title: 'Переключить тему', action: 'toggleTheme()' },
+      { id: '__theme', html: navInner('settings', document.documentElement.classList.contains('light') ? 'Светлая тема' : 'Тёмная тема'), title: 'Переключить тему', action: 'toggleTheme()' },
     ];
   } else {
     items = [
-      { id: 'discover', label: 'DISCOVER', title: 'Глобальная лента — все посты' },
-      { id: 'artists', label: 'ARTISTS', title: 'Каталог всех пользователей' },
-      { id: 'login', label: 'ВОЙТИ', title: 'Войти или зарегистрироваться' },
+      { id: 'discover', html: navInner('home', 'Discover'), title: 'Глобальная лента — все посты' },
+      { id: 'artists', html: navInner('profile', 'Artists'), title: 'Каталог всех пользователей' },
+      { id: 'login', html: navInner('lock', 'Войти'), title: 'Войти или зарегистрироваться' },
       { sep: true },
-      { id: '__theme', label: `${document.documentElement.classList.contains('light') ? '◑' : '◐'} ТЕМА`, title: 'Переключить тему', action: 'toggleTheme()' },
+      { id: '__theme', html: navInner('settings', document.documentElement.classList.contains('light') ? 'Светлая тема' : 'Тёмная тема'), title: 'Переключить тему', action: 'toggleTheme()' },
     ];
   }
   const html = items.map(i =>
     i.sep
       ? `<div class="nav-sep"></div>`
-      : `<span role="button" tabindex="0" class="nav-item ${[page === i.id && !i.action ? 'active' : ''].filter(Boolean).join(' ')}" title="${i.title || ''}" onclick="${i.action || `go('${i.id}'${i.param ? `,'${i.param}'` : ''})`}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">${i.label}</span>`
+      : `<span role="button" tabindex="0" class="nav-item ${[page === i.id && !i.action ? 'active' : ''].filter(Boolean).join(' ')}" title="${esc(i.title || '')}" data-nav-action="${i.action ? 'theme' : 'go'}" data-nav-page="${i.id || ''}" data-nav-param="${i.param || ''}">${i.html}</span>`
   ).join('');
   el.innerHTML = html;
-  mob.innerHTML = html;
+  mob.innerHTML = `
+    <div class="mobile-menu-head">
+      <div class="mobile-menu-brand">
+        <div class="mobile-menu-logo">W<span class="logo-zero">Ø</span>PIUM</div>
+        <div class="mobile-menu-user">${me ? `@${esc(me.username || '')}` : 'Guest access'}</div>
+      </div>
+      <button type="button" class="mobile-menu-close" data-ui-action="close-menu" aria-label="Close menu">${iconCut('close', 'ui-icon', 16, 16)}</button>
+    </div>
+    <div class="mobile-menu-list">${html}</div>
+  `;
   // Admin FAB
   let fab = document.getElementById('adminFab');
   if (me?.is_admin) {
@@ -707,15 +910,414 @@ function renderNav() {
       document.body.appendChild(fab);
     }
     fab.className = page === 'admin' ? 'active' : '';
-    fab.textContent = '⚡';
+    fab.innerHTML = iconCut('settings', 'ui-icon', 20, 20);
   } else if (fab) {
     fab.remove();
   }
 }
 
-function toggleMenu() {
-  const m = $('#mobileMenu');
-  m.classList.toggle('hidden');
+function setMobileMenuOpen(open) {
+  const menu = $('#mobileMenu');
+  const burger = $('#burger');
+  if (!menu) return;
+  const shouldOpen = Boolean(open);
+  menu.classList.toggle('hidden', !shouldOpen);
+  document.body.classList.toggle('menu-open', shouldOpen);
+  burger?.classList.toggle('active', shouldOpen);
+  burger?.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+}
+
+function toggleMenu(open) {
+  const menu = $('#mobileMenu');
+  if (!menu) return;
+  setMobileMenuOpen(typeof open === 'boolean' ? open : menu.classList.contains('hidden'));
+}
+
+function initUiDelegates() {
+  if (window.__uiDelegatesBound) return;
+  window.__uiDelegatesBound = true;
+
+  document.addEventListener('click', ev => {
+    if (
+      document.body.classList.contains('menu-open') &&
+      !ev.target.closest('#mobileMenu') &&
+      !ev.target.closest('#burger')
+    ) {
+      setMobileMenuOpen(false);
+    }
+
+    const uiActionEl = ev.target.closest('[data-ui-action]');
+    if (uiActionEl) {
+      const uiAction = uiActionEl.dataset.uiAction;
+      if (uiAction === 'go-feed') return go('feed');
+      if (uiAction === 'toggle-menu') return toggleMenu();
+      if (uiAction === 'close-menu') return setMobileMenuOpen(false);
+    }
+
+    const navItem = ev.target.closest('.nav-item[data-nav-action]');
+    if (navItem) {
+      const action = navItem.dataset.navAction;
+      if (action === 'theme') toggleTheme();
+      else if (action === 'go') go(navItem.dataset.navPage || 'feed', navItem.dataset.navParam || undefined);
+      if (navItem.closest('#mobileMenu')) setMobileMenuOpen(false);
+      return;
+    }
+
+    const postActionEl = ev.target.closest('[data-post-action]');
+    if (!postActionEl) return;
+    const action = postActionEl.dataset.postAction;
+    if (action !== 'toggle-chat-tools-menu' && postActionEl.closest('.chat-tools-menu')) {
+      postActionEl.closest('.chat-tools-menu')?.classList.add('hidden');
+    }
+    const postId = postActionEl.dataset.postId || '';
+    switch (action) {
+      case 'like': return togLike(postId, postActionEl);
+      case 'likers': return showLikers(postId);
+      case 'comments': return togCmts(postId);
+      case 'repost': return showRepostMenu(postId, postActionEl, postActionEl.dataset.reposted === '1');
+      case 'bookmark': return togBookmark(postId, postActionEl);
+      case 'edit': return editPost(postId);
+      case 'pin': return pinPost(postId);
+      case 'unpin': return unpinPost(postId);
+      case 'archive': return archivePost(postId, postActionEl);
+      case 'unarchive': return unarchivePost(postId, postActionEl);
+      case 'delete': return delPost(postId);
+      case 'report': return showReportMenu(postId, postActionEl);
+      case 'copy-link': return copyPostLink(postId);
+      case 'react-add': return openPostReactPicker(postId, postActionEl);
+      case 'react-toggle': return togglePostReact(postId, postActionEl.dataset.emoji || '', postActionEl);
+      case 'open-image': return openImg(postActionEl.dataset.image || '');
+      case 'go-profile': return go('profile', postActionEl.dataset.username || '');
+      case 'go-hashtag': return go('hashtag', postActionEl.dataset.tag || '');
+      case 'track-play': return trackPlay(postId);
+      case 'expand-post': return expandPost(postId);
+      case 'send-comment': return sendCmt(postId);
+      case 'cancel-edit-msg': return cancelEditMsg(postActionEl.dataset.msgId || '');
+      case 'submit-edit-msg': return submitEditMsg(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '');
+      case 'scroll-to-msg': return scrollToMsg(postActionEl.dataset.msgId || '');
+      case 'jump-to-message':
+        postActionEl.closest('.modal-overlay')?.remove();
+        return jumpToMessage(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '');
+      case 'go-chat': return go('chat', postActionEl.dataset.convId || '');
+      case 'go-chats': return go('chats');
+      case 'go-disk': return go('disk');
+      case 'go-discover': return go('discover');
+      case 'go-feed': return go('feed');
+      case 'go': return go(postActionEl.dataset.navTarget || 'feed');
+      case 'open-user-info-panel': return openUserInfoPanel(postActionEl.dataset.username || '');
+      case 'leave-group-chat': return leaveGroupChat(postActionEl.dataset.convId || '');
+      case 'toggle-group-members': return toggleGroupMembers();
+      case 'edit-group-info': return editGroupInfo(postActionEl.dataset.convId || '');
+      case 'open-media-gallery': return openMediaGallery(postActionEl.dataset.convId || '');
+      case 'toggle-chat-search': return toggleChatSearch(postActionEl.dataset.convId || '');
+      case 'toggle-chat-mute': return toggleChatMute(postActionEl.dataset.convId || '');
+      case 'toggle-chat-pin': return toggleChatPin(postActionEl.dataset.convId || '');
+      case 'toggle-chat-tools-menu': return toggleChatToolsMenu(postActionEl);
+      case 'toggle-chat-list-archive':
+        chatListShowArchived = !chatListShowArchived;
+        return loadChats();
+      case 'toggle-chat-archive': return toggleChatArchive(postActionEl.dataset.convId || '', postActionEl.dataset.archived === '1');
+      case 'open-saved-messages': return openSavedMessages(postActionEl.dataset.convId || '');
+      case 'export-chat': return exportChat(postActionEl.dataset.convId || '');
+      case 'scroll-to-pinned':
+        if (postActionEl.classList.contains('pinned-msg-unpin')) return;
+        return scrollToPinned(postActionEl.dataset.msgId || '');
+      case 'unpin-message':
+        ev.stopPropagation();
+        return unpinMessage(postActionEl.dataset.convId || '');
+      case 'remove-group-member':
+        return removeGroupMember(postActionEl.dataset.convId || '', postActionEl.dataset.memberId || '', postActionEl.dataset.username || '');
+      case 'add-group-member': return addGroupMember(postActionEl.dataset.convId || '');
+      case 'scroll-chat-bottom': return scrollChatToBottom();
+      case 'toggle-chat-attach': return toggleChatAttach();
+      case 'close-chat-attach': return closeChatAttach();
+      case 'cancel-recording': return cancelRecording();
+      case 'stop-recording-preview': return stopRecordingPreview();
+      case 'cancel-voice-preview': return cancelVoicePreview();
+      case 'restart-voice-recording': return restartVoiceRecording();
+      case 'clear-chat-attachment': return clearChatAttachment();
+      case 'vp-preview-toggle': return vpPreviewToggle();
+      case 'vp-toggle': return vpToggle(postActionEl.dataset.vpId || '', postActionEl.dataset.vpSrc || '');
+      case 'vp-cycle-speed': return vpCycleSpeed(postActionEl);
+      case 'send-voice-preview': return sendVoicePreview();
+      case 'accept-dm-request': return acceptDmRequest(postActionEl.dataset.convId || '');
+      case 'decline-dm-request': return declineDmRequest(postActionEl.dataset.convId || '');
+      case 'open-video': return openVideo(postActionEl.dataset.video || '');
+      case 'start-msg-reply':
+        closeMsgMenuPopover();
+        return startMsgReply(postActionEl.dataset.msgId || '', postActionEl.dataset.replyText || '', postActionEl);
+      case 'start-edit-msg':
+        closeMsgMenuPopover();
+        return startEditMsg(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '');
+      case 'delete-msg':
+        closeMsgMenuPopover();
+        return deleteMsg(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '');
+      case 'pin-message':
+        closeMsgMenuPopover();
+        return pinMessage(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '');
+      case 'forward-msg':
+        closeMsgMenuPopover();
+        return forwardMsg(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '');
+      case 'open-msg-menu': return openMsgMenu(postActionEl);
+      case 'copy-msg-text': return copyMsgText(postActionEl.dataset.msgId || '', postActionEl.closest('.modal-overlay, .msg-menu-popover'));
+      case 'report-msg': return showMessageReport(postActionEl.dataset.msgId || '', postActionEl.closest('.modal-overlay, .msg-menu-popover'));
+      case 'msg-details': return showMsgDetails(postActionEl.dataset.msgId || '', postActionEl.closest('.modal-overlay, .msg-menu-popover'));
+      case 'toggle-save-msg':
+        closeMsgMenuPopover();
+        return toggleSaveMsg(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '', postActionEl.dataset.saved === '1');
+      case 'do-report-message':
+        return submitMessageReport(postActionEl.dataset.msgId || '', postActionEl.dataset.reason || '', postActionEl.closest('.modal-overlay, .msg-menu-popover'));
+      case 'cancel-msg-reply': return cancelMsgReply();
+      case 'go-settings': return go('settings');
+      case 'follow-user': return doFollow(postActionEl.dataset.userId || '', postActionEl.dataset.username || '');
+      case 'unfollow-user': return unfollow(postActionEl.dataset.userId || '', postActionEl.dataset.username || '');
+      case 'start-chat': return startChat(postActionEl.dataset.userId || '', postActionEl.dataset.username || '');
+      case 'block-user': return blockUser(postActionEl.dataset.username || '');
+      case 'unblock-user': return unblockUser(postActionEl.dataset.username || '');
+      case 'mute-user': return muteUser(postActionEl.dataset.username || '');
+      case 'unmute-user': return unmuteUser(postActionEl.dataset.username || '');
+      case 'show-posts-count': return showPostsCount();
+      case 'show-followers': return showFollowersList(postActionEl.dataset.username || '');
+      case 'show-following': return showFollowingList(postActionEl.dataset.username || '');
+      case 'profile-tab': return switchProfileTab(postActionEl, postActionEl.dataset.tabId || 'postsTab');
+      case 'profile-avatar-pick': return document.getElementById('profileAvaFile')?.click();
+      case 'settings-avatar-pick': return document.getElementById('avaFile')?.click();
+      case 'save-profile': return saveProfile();
+      case 'do-logout': return doLogout();
+      case 'rotate-invite': return rotateInvite();
+      case 'load-sessions': return loadSessions();
+      case 'revoke-other-sessions': return revokeOtherSessions();
+      case 'submit-verify-request': return submitVerifyRequest();
+      case 'change-password': return changePassword();
+      case 'export-data': return exportData();
+      case 'delete-account': return deleteAccount();
+      case 'refresh-hub-external': return refreshHubExternal();
+      case 'save-hub-key': return saveHubKey(postActionEl.dataset.platformId || '');
+      case 'admin-switch-tab': return adminSwitch(postActionEl.dataset.tab || 'stats');
+      case 'admin-diag-refresh': return adminDiagRefresh();
+      case 'admin-enqueue-noop-job': return adminEnqueueNoopJob();
+      case 'admin-del-drop': return adminDelDrop(postActionEl.dataset.dropId || '');
+      case 'delete-drop': return delDrop(postActionEl.dataset.dropId || '');
+      case 'admin-resolve-report': return adminResolveReport(postActionEl.dataset.reportId || '');
+      case 'admin-approve-verify': return adminApproveVerify(postActionEl.dataset.requestId || '');
+      case 'admin-reject-verify': return adminRejectVerify(postActionEl.dataset.requestId || '');
+      case 'admin-ban':
+        return adminBan(postActionEl.dataset.userId || '', postActionEl.dataset.username || '', postActionEl.dataset.isBanned === '1');
+      case 'admin-promote':
+        return adminPromote(postActionEl.dataset.userId || '', postActionEl.dataset.username || '', postActionEl.dataset.isAdmin === '1');
+      case 'admin-verify':
+        return adminVerify(
+          postActionEl.dataset.userId || '',
+          postActionEl.dataset.username || '',
+          postActionEl.dataset.isVerified === '1',
+          postActionEl.dataset.badgeType || '',
+        );
+      case 'admin-delete-user':
+        return adminDeleteUser(postActionEl.dataset.userId || '', postActionEl.dataset.username || '');
+      case 'do-auth': return doAuth(postActionEl.dataset.mode || 'login');
+      case 'show-forgot-step': return showForgotStep();
+      case 'go-register': return go('register');
+      case 'go-login': return go('login');
+      case 'do-verify': return doVerify(postActionEl.dataset.username || '');
+      case 'resend-verify': return resendVerify(postActionEl.dataset.username || '');
+      case 'do-forgot': return doForgot();
+      case 'do-reset': return doReset(postActionEl.dataset.email || '');
+      case 'do-resend-reset': return doResendReset(postActionEl.dataset.email || '');
+      case 'accept-follow-req': return acceptFollowReq(postActionEl.dataset.requestId || '', postActionEl);
+      case 'decline-follow-req': return declineFollowReq(postActionEl.dataset.requestId || '', postActionEl);
+      case 'close-group-modal': return document.getElementById('groupModal')?.remove();
+      case 'close-modal-overlay': return postActionEl.closest('.modal-overlay')?.remove();
+      case 'do-forward-msg':
+        return doForwardMsg(
+          postActionEl.dataset.mid || '',
+          postActionEl.dataset.srcCid || '',
+          postActionEl.dataset.targetCid || '',
+          postActionEl.closest('.modal-overlay')
+        );
+      case 'do-chat-mute':
+        return doChatMute(
+          postActionEl.dataset.convId || '',
+          Number(postActionEl.dataset.muteHours || 0),
+          postActionEl.closest('.modal-overlay')
+        );
+      case 'show-create-group-modal':
+      case 'open-new-group-chat':
+        return showCreateGroupModal();
+      case 'create-group': return createGroup();
+      case 'modal-close': return closeModal();
+      case 'modal-go-profile':
+        closeModal();
+        return go('profile', postActionEl.dataset.username || '');
+      case 'switch-gallery-tab':
+        return switchGalleryTab(postActionEl, postActionEl.dataset.galleryTab || 'images', postActionEl.dataset.convId || '');
+      case 'save-group-info':
+        return saveGroupInfo(postActionEl.dataset.convId || '', postActionEl.closest('.modal-overlay'));
+      case 'close-user-info-panel': return closeUserInfoPanel();
+      case 'open-profile-from-panel':
+        go('profile', postActionEl.dataset.username || '');
+        return closeUserInfoPanel();
+      case 'follow-user-from-panel': return followUser(postActionEl.dataset.userId || '', postActionEl);
+      case 'block-user-from-panel': return blockUserFromPanel(postActionEl.dataset.username || '');
+      case 'repost-direct': return repostDirect(postId);
+      case 'quote-compose': return showQuoteCompose(postId);
+      case 'quote-cancel':
+        document.getElementById(`qc-${postId}`)?.remove();
+        return;
+      case 'quote-submit': return submitQuote(postId);
+      case 'add-poll-option': return addPollOption();
+      case 'toggle-attach-menu': return toggleAttachMenu(postActionEl.dataset.prefix || '');
+      case 'close-attach-menu': return closeAttachMenu(postActionEl.dataset.prefix || '');
+      case 'select-track': return selectTrack(postActionEl.dataset.prefix || '');
+      case 'toggle-poll-composer': return togglePollComposer();
+      case 'toggle-text-pos': return toggleTextPos();
+      case 'toggle-scheduler': return toggleScheduler();
+      case 'submit-post': return submitPost();
+      case 'submit-drop': return submitDrop();
+      case 'disk-load-root': return loadDiskFolder(null);
+      case 'disk-load-folder': return loadDiskFolder(postActionEl.dataset.folderId || '');
+      case 'disk-delete-folder':
+        ev.stopPropagation();
+        return deleteDiskFolder(postActionEl.dataset.folderId || '');
+      case 'disk-item-click': return diskItemClick(postActionEl.dataset.fileId || '');
+      case 'disk-delete-file':
+        ev.stopPropagation();
+        return deleteDiskFile(postActionEl.dataset.fileId || '');
+      case 'disk-play-pause': return diskPlayPause();
+      case 'disk-seek-bar': return diskSeekBar(ev);
+      case 'disk-toggle-mute': return diskToggleMute();
+      case 'disk-open-edit': return openDiskEdit(postActionEl.dataset.fileId || '');
+      case 'disk-copy-public-link':
+        postActionEl.select?.();
+        return navigator.clipboard.writeText(postActionEl.value || '').then(() => toast.success('Скопировано')).catch(() => {});
+      case 'disk-toggle-public-link': return toggleDiskPublicLink(postActionEl.dataset.fileId || '');
+      case 'disk-delete-file-preview': return deleteDiskFile(postActionEl.dataset.fileId || '', true);
+      case 'disk-save-edit': return saveDiskEdit(postActionEl.dataset.fileId || '');
+      case 'disk-cancel-edit': return _renderDiskPreview(_diskFiltered[diskPreviewIdx]);
+      case 'disk-create-folder': return createDiskFolder();
+      case 'disk-open-upload': return document.getElementById('diskFileInput')?.click();
+      case 'disk-toggle-select-mode': return toggleDiskSelectMode();
+      case 'disk-set-view': return setDiskView(postActionEl.dataset.view || 'grid');
+      case 'disk-create-folder-prompt': return diskCreateFolderPrompt();
+      case 'disk-set-sort': return setDiskSort(postActionEl.dataset.sortKey || 'date');
+      case 'disk-set-filter': return setDiskFilter(postActionEl.dataset.filterKey || 'all');
+      case 'disk-download-zip': return downloadDiskZip();
+      case 'disk-bulk-delete': return bulkDeleteDisk();
+      case 'disk-overlay-close': return closeDiskPreview(ev);
+      case 'disk-preview-box':
+        ev.stopPropagation();
+        return;
+      case 'disk-close-preview': return closeDiskPreview();
+      case 'disk-nav-preview':
+        ev.stopPropagation();
+        return diskNavPreview(Number(postActionEl.dataset.navDir || 0));
+      case 'submit-report':
+        return submitReport(
+          postActionEl.dataset.reportType || 'post',
+          postActionEl.dataset.targetId || '',
+          postActionEl.dataset.reason || '',
+        );
+      case 'poll-vote':
+        return voteOnPoll(
+          postActionEl.dataset.postId || '',
+          postActionEl.dataset.pollId || '',
+          postActionEl.dataset.optId || '',
+          postActionEl,
+        );
+    }
+  });
+
+  document.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape' && document.body.classList.contains('menu-open')) {
+      setMobileMenuOpen(false);
+      return;
+    }
+    const navItem = ev.target.closest('.nav-item[data-nav-action]');
+    if (navItem && (ev.key === 'Enter' || ev.key === ' ')) {
+      ev.preventDefault();
+      navItem.click();
+      return;
+    }
+    const commentInput = ev.target.closest('input[data-post-action="comment-input"]');
+    if (commentInput && ev.key === 'Enter') {
+      ev.preventDefault();
+      sendCmt(commentInput.dataset.postId || '');
+      return;
+    }
+    const actionEl = ev.target.closest('[data-post-action]');
+    if (actionEl && (ev.key === 'Enter' || ev.key === ' ')) {
+      ev.preventDefault();
+      actionEl.click();
+    }
+  });
+
+  document.addEventListener('input', ev => {
+    const actionInput = ev.target.closest('[data-post-action]');
+    if (actionInput?.dataset.postAction === 'disk-search-input') return setDiskSearch(actionInput.value || '');
+    if (actionInput?.dataset.postAction === 'disk-set-volume') return diskSetVolume(actionInput.value);
+    const searchInput = ev.target.closest('input[data-post-action="chat-search-input"]');
+    if (searchInput) debouncedChatSearch(searchInput.dataset.convId || '');
+    const adminSearchInput = ev.target.closest('#adminUserSearch');
+    if (adminSearchInput) adminFilterUsers();
+  });
+
+  document.addEventListener('change', ev => {
+    const actionEl = ev.target.closest('[data-post-action]');
+    if (actionEl?.dataset.postAction === 'disk-file-input') uploadDiskFiles(actionEl.files || []);
+  });
+
+  document.addEventListener('dragover', ev => {
+    const dragEl = ev.target.closest('[data-post-action-dragover]');
+    if (!dragEl) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (dragEl.dataset.postActionDragover === 'disk-folder-dragover') dragEl.classList.add('drag-target');
+  });
+
+  document.addEventListener('dragleave', ev => {
+    const dragEl = ev.target.closest('[data-post-action-dragleave]');
+    if (!dragEl) return;
+    if (dragEl.dataset.postActionDragleave === 'disk-folder-dragleave') dragEl.classList.remove('drag-target');
+  });
+
+  document.addEventListener('drop', ev => {
+    const dragEl = ev.target.closest('[data-post-action-drop]');
+    if (!dragEl) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    dragEl.classList.remove('drag-target');
+    if (dragEl.dataset.postActionDrop === 'disk-folder-drop') {
+      diskFileDrop(dragEl.dataset.folderDropId || '', ev);
+    }
+  });
+
+  document.addEventListener('mousedown', ev => {
+    const actionEl = ev.target.closest('[data-post-action]');
+    if (!actionEl) return;
+    if (actionEl.dataset.postAction === 'insert-mention') {
+      ev.preventDefault();
+      insertMention(actionEl.dataset.textareaId || '', actionEl.dataset.dropId || '', actionEl.dataset.username || '');
+    }
+    if (actionEl.dataset.postAction === 'insert-chat-mention') {
+      ev.preventDefault();
+      insertChatMention(actionEl.dataset.textareaId || '', actionEl.dataset.username || '');
+    }
+  });
+
+  document.addEventListener('dragstart', ev => {
+    const dragEl = ev.target.closest('[data-post-action-dragstart]');
+    if (!dragEl) return;
+    if (dragEl.dataset.postActionDragstart === 'disk-drag-start') {
+      diskDragStart(dragEl.dataset.dragFileId || '', ev);
+    }
+  });
+
+  document.addEventListener('dragend', ev => {
+    const dragEl = ev.target.closest('[data-post-action-dragend]');
+    if (!dragEl) return;
+    if (dragEl.dataset.postActionDragend === 'disk-drag-end') {
+      dragEl.classList.remove('dragging-file');
+    }
+  });
 }
 
 // ── ROUTER ──
@@ -827,21 +1429,21 @@ function composerHtml() {
           <input class="input poll-opt-input" placeholder="Вариант 1" maxlength="100" autocomplete="off">
           <input class="input poll-opt-input" placeholder="Вариант 2" maxlength="100" autocomplete="off">
         </div>
-        <button class="btn btn-sm btn-ghost" onclick="addPollOption()" id="cPollAddBtn">+ вариант</button>
+        <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="add-poll-option" id="cPollAddBtn">${iconCut('add', 'ui-icon', 12, 12)}вариант</button>
       </div>
       <div class="composer-toolbar">
         <div class="composer-tools">
           <div class="attach-wrap" id="cAttachWrap">
-            <button class="composer-tool attach-btn" onclick="toggleAttachMenu('c')" title="Прикрепить">⊕</button>
+            <button class="composer-tool attach-btn" data-post-action="toggle-attach-menu" data-prefix="c" title="Прикрепить">${iconCut('attach', 'ui-icon', 17, 17)}</button>
             <div class="attach-menu hidden" id="cAttachMenu">
-              <label class="attach-opt" for="cImg" onclick="closeAttachMenu('c')">↑ фото</label>
-              <button class="attach-opt" onclick="selectTrack('c')">♫ soundcloud</button>
-              <button class="attach-opt" id="cPollBtn" onclick="togglePollComposer()">◈ опрос</button>
+              <label class="attach-opt" for="cImg" data-post-action="close-attach-menu" data-prefix="c">UP фото</label>
+              <button class="attach-opt" data-post-action="select-track" data-prefix="c">SC soundcloud</button>
+              <button class="attach-opt attach-opt--ic" id="cPollBtn" data-post-action="toggle-poll-composer">${iconCut('more-horizontal', 'ui-icon attach-opt-ic', 13, 13)}опрос</button>
             </div>
           </div>
           <input type="file" id="cImg" accept="image/*,.heic,.heif" style="display:none">
-          <button class="composer-tool text-pos-btn" id="cTextPosBtn" onclick="toggleTextPos()" title="Текст сверху — нажми чтобы поставить снизу">↑ текст</button>
-          <button type="button" class="composer-btn composer-tool" id="scheduleToggle" onclick="toggleScheduler()" title="Запланировать" style="opacity:0.5">🕐</button>
+          <button class="composer-tool text-pos-btn" id="cTextPosBtn" data-post-action="toggle-text-pos" title="Текст сверху — нажми чтобы поставить снизу">${iconCut('upload', 'ui-icon', 15, 15)}</button>
+          <button type="button" class="composer-btn composer-tool" id="scheduleToggle" data-post-action="toggle-scheduler" title="Запланировать" style="opacity:0.5">${iconCut('settings', 'ui-icon', 15, 15)}</button>
         </div>
         <div id="schedulerPanel" style="display:none;margin-top:8px">
           <input type="datetime-local" id="scheduledAt" class="composer-input input" style="width:100%;font-size:13px" />
@@ -849,7 +1451,7 @@ function composerHtml() {
         </div>
         <div class="composer-submit">
           <input type="text" id="cTrack" placeholder="soundcloud.com/..." class="track-input hidden">
-          <button class="btn btn-sm" onclick="submitPost()">ОПУБЛИКОВАТЬ</button>
+          <button class="btn btn-sm btn-ic-row" data-post-action="submit-post">${iconCut('send', 'ui-icon', 14, 14)}ОПУБЛИКОВАТЬ</button>
         </div>
       </div>
       <div id="cImgName" style="font-size:0.6rem;color:var(--fg3);margin-top:0.3rem"></div>
@@ -895,7 +1497,7 @@ function toggleTextPos() {
   const btn = $('#cTextPosBtn');
   if (btn) {
     const isBelow = cTextPos === 'below';
-    btn.innerHTML = isBelow ? '↓ текст' : '↑ текст';
+    btn.innerHTML = isBelow ? iconCut('download', 'ui-icon', 15, 15) : iconCut('upload', 'ui-icon', 15, 15);
     btn.title = isBelow ? 'Текст снизу — нажми чтобы вернуть вверх' : 'Текст сверху — нажми чтобы поставить снизу';
     btn.classList.toggle('on', isBelow);
   }
@@ -926,7 +1528,7 @@ function bindMentionAutocomplete(textareaId, dropId) {
         const users = await api(`/users/suggest?q=${encodeURIComponent(q)}`);
         if (!users.length) { drop.classList.add('hidden'); return; }
         drop.innerHTML = users.map(u => `
-          <div class="mention-opt" onmousedown="insertMention('${textareaId}','${dropId}','${esc(u.username)}')">
+          <div class="mention-opt" data-post-action="insert-mention" data-textarea-id="${textareaId}" data-drop-id="${dropId}" data-username="${esc(u.username)}">
             <span class="mention-name">${esc(u.display_name)}</span>
             <span class="mention-handle">@${esc(u.username)}</span>
           </div>`).join('');
@@ -1020,7 +1622,7 @@ function truncatedContent(text, id) {
   const short = text.slice(0, 300);
   const rest = text.slice(300);
   return `<div class="post-body">
-    <span class="post-trunc-text" id="pt-${id}">${linkifyContent(short)}<span class="post-read-more" onclick="expandPost('${id}')">… читать дальше</span><span class="post-rest hidden" id="pr-${id}">${linkifyContent(rest)}</span></span>
+    <span class="post-trunc-text" id="pt-${id}">${linkifyContent(short)}<span class="post-read-more" data-post-action="expand-post" data-post-id="${id}">… читать дальше</span><span class="post-rest hidden" id="pr-${id}">${linkifyContent(rest)}</span></span>
   </div>`;
 }
 function expandPost(id) {
@@ -1041,17 +1643,17 @@ function postHtml(p) {
         const encoded = encodeURIComponent(url);
         oTrack = `<iframe class="sc-player" width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encoded}&amp;color=%231c1c1c&amp;auto_play=false&amp;hide_related=true&amp;show_comments=false&amp;show_user=false&amp;show_reposts=false"></iframe>`;
       } else {
-        oTrack = `<div class="post-track">♫ <a href="${safeUrl(url)}" target="_blank" rel="noopener">${truncUrl(url)}</a></div>`;
+        oTrack = `<div class="post-track">${iconCut('mic', 'ui-icon post-track-ic', 12, 12)} <a href="${safeUrl(url)}" target="_blank" rel="noopener">${truncUrl(url)}</a></div>`;
       }
     }
     let oImg = '';
-    if (o.image) oImg = `<div class="post-img" onclick="openImg('${esc(o.image)}')"><img src="${esc(o.image)}" loading="lazy" alt=""></div>`;
+    if (o.image) oImg = `<div class="post-img" data-post-action="open-image" data-image="${esc(o.image)}"><img src="${esc(o.image)}" loading="lazy" alt=""></div>`;
     return `
       <div class="post" data-id="${p.id}">
         ${repostBanner}
         <div class="post-head">
           ${avatarEl(o.avatar, 'avatar', initial(o.display_name))}
-          <span class="post-name" onclick="go('profile','${esc(o.username)}')">${esc(o.display_name)}${verifiedBadge(o.is_verified, o.badge_type)}</span>
+          <span class="post-name" data-post-action="go-profile" data-username="${esc(o.username)}">${esc(o.display_name)}${verifiedBadge(o.is_verified, o.badge_type)}</span>
           <span class="post-handle">@${esc(o.username)}</span>
           <span class="post-time">${timeAgoEl(o.created_at)}</span>
         </div>
@@ -1069,13 +1671,13 @@ function postHtml(p) {
     const url = p.track_url.trim();
     if (/soundcloud\.com/.test(url)) {
       const encoded = encodeURIComponent(url);
-      track = `<div class="sc-wrap" onclick="trackPlay('${p.id}')"><iframe class="sc-player" width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encoded}&amp;color=%231c1c1c&amp;auto_play=false&amp;hide_related=true&amp;show_comments=false&amp;show_user=false&amp;show_reposts=false"></iframe></div>`;
+      track = `<div class="sc-wrap" data-post-action="track-play" data-post-id="${p.id}"><iframe class="sc-player" width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encoded}&amp;color=%231c1c1c&amp;auto_play=false&amp;hide_related=true&amp;show_comments=false&amp;show_user=false&amp;show_reposts=false"></iframe></div>`;
     } else {
-      track = `<div class="post-track">♫ <a href="${safeUrl(url)}" target="_blank" rel="noopener" onclick="trackPlay('${p.id}')">${truncUrl(url)}</a></div>`;
+      track = `<div class="post-track">${iconCut('mic', 'ui-icon post-track-ic', 12, 12)} <a href="${safeUrl(url)}" target="_blank" rel="noopener" data-post-action="track-play" data-post-id="${p.id}">${truncUrl(url)}</a></div>`;
     }
   }
   let img = '';
-  if (p.image) img = `<div class="post-img" onclick="openImg('${esc(p.image)}')"><img src="${esc(p.image)}" loading="lazy" alt=""></div>`;
+  if (p.image) img = `<div class="post-img" data-post-action="open-image" data-image="${esc(p.image)}"><img src="${esc(p.image)}" loading="lazy" alt=""></div>`;
 
   // poll
   let pollHtml = '';
@@ -1085,20 +1687,20 @@ function postHtml(p) {
       const pct = p.poll.total > 0 ? Math.round(o.votes / p.poll.total * 100) : 0;
       const isMine = p.poll.my_vote === o.id;
       if (voted) {
-        return `<div class="poll-result ${isMine?'poll-mine':''}" style="cursor:pointer" onclick="voteOnPoll('${p.id}','${p.poll.id}','${o.id}',this)" title="Изменить голос">
+        return `<div class="poll-result ${isMine?'poll-mine':''}" style="cursor:pointer" data-post-action="poll-vote" data-post-id="${p.id}" data-poll-id="${p.poll.id}" data-opt-id="${o.id}" title="Изменить голос">
           <div class="poll-bar-wrap"><div class="poll-bar" style="width:${pct}%"></div></div>
           <span class="poll-label">${esc(o.text)}</span>
           <span class="poll-pct">${pct}%</span>
         </div>`;
       }
-      return `<button class="poll-option" onclick="voteOnPoll('${p.id}','${p.poll.id}','${o.id}',this)">${esc(o.text)}</button>`;
+      return `<button class="poll-option" data-post-action="poll-vote" data-post-id="${p.id}" data-poll-id="${p.poll.id}" data-opt-id="${o.id}">${esc(o.text)}</button>`;
     }).join('');
     const total = p.poll.total;
     pollHtml = `<div class="poll-container" id="poll-${p.id}">${opts}<div class="poll-total">${total} ${total===1?'голос':total<5?'голоса':'голосов'}</div></div>`;
   }
 
-  const pinBanner = p.is_pinned ? `<div class="post-pin-banner">📌 Закреплено</div>` : '';
-  const archBanner = p.archived ? `<div class="post-pin-banner" style="color:var(--fg3)">🗃 Архив</div>` : '';
+  const pinBanner = p.is_pinned ? `<div class="post-pin-banner"><span class="pinned-bar-pin-ic">${iconCut('pin', 'ui-icon', 14, 14)}</span> Закреплено</div>` : '';
+  const archBanner = p.archived ? `<div class="post-pin-banner" style="color:var(--fg3)"><span class="pinned-bar-pin-ic">${iconCut('bookmark-filled', 'ui-icon', 13, 13)}</span> Архив</div>` : '';
   const urlMatch = p.content ? p.content.match(/https?:\/\/[^\s<>"']+/) : null;
   const previewUrl = urlMatch ? urlMatch[0] : null;
   const linkPreviewEl = previewUrl ? `<div class="post-link-preview" data-url="${esc(previewUrl)}" style="display:none"></div>` : '';
@@ -1107,7 +1709,7 @@ function postHtml(p) {
       ${pinBanner}${archBanner}
       <div class="post-head">
         ${avatarEl(p.avatar, 'avatar', initial(p.display_name))}
-        <span class="post-name" onclick="go('profile','${esc(p.username)}')">${esc(p.display_name)}${verifiedBadge(p.is_verified, p.badge_type)}</span>
+        <span class="post-name" data-post-action="go-profile" data-username="${esc(p.username)}">${esc(p.display_name)}${verifiedBadge(p.is_verified, p.badge_type)}</span>
         <span class="post-handle">@${esc(p.username)}</span>
         <span class="post-time">${timeAgoEl(p.created_at)}</span>
       </div>
@@ -1165,7 +1767,7 @@ async function voteOnPoll(postId, pollId, optId, btn) {
     const opts = d.options.map(o => {
       const pct = d.total > 0 ? Math.round(o.votes / d.total * 100) : 0;
       const isMine = d.my_vote === o.id;
-      return `<div class="poll-result ${isMine?'poll-mine':''}" style="cursor:pointer" onclick="voteOnPoll('${postId}','${pollId}','${o.id}',this)" title="Изменить голос">
+      return `<div class="poll-result ${isMine?'poll-mine':''}" style="cursor:pointer" data-post-action="poll-vote" data-post-id="${postId}" data-poll-id="${pollId}" data-opt-id="${o.id}" title="Изменить голос">
         <div class="poll-bar-wrap"><div class="poll-bar" style="width:${pct}%"></div></div>
         <span class="poll-label">${esc(o.text)}</span>
         <span class="poll-pct">${pct}%</span>
@@ -1185,38 +1787,38 @@ function trackPlay(postId) {
 
 function actionsHtml(p) {
   const isOwn = me && me.id === p.user_id;
-  const del = isOwn ? `<button class="act" title="Удалить" onclick="delPost('${p.id}')">✕</button>` : '';
+  const del = isOwn ? `<button class="act" title="Удалить" data-post-action="delete" data-post-id="${p.id}">${iconCut('trash', 'ui-icon', 16, 16)}</button>` : '';
   const pin = isOwn
     ? p.is_pinned
-      ? `<button class="act act-pin on" title="Открепить" onclick="unpinPost('${p.id}')">✦</button>`
-      : `<button class="act act-pin" title="Закрепить" onclick="pinPost('${p.id}')">✧</button>`
+      ? `<button class="act act-pin on" title="Открепить" data-post-action="unpin" data-post-id="${p.id}">${iconCut('unpin', 'ui-icon', 16, 16)}</button>`
+      : `<button class="act act-pin" title="Закрепить" data-post-action="pin" data-post-id="${p.id}">${iconCut('pin', 'ui-icon', 16, 16)}</button>`
     : '';
   const archive = isOwn
     ? p.archived
-      ? `<button class="act act-archive on" title="Разархивировать" onclick="unarchivePost('${p.id}',this)">ВЕРНУТЬ</button>`
-      : `<button class="act act-archive" title="Архивировать" onclick="archivePost('${p.id}',this)">◫</button>`
+      ? `<button class="act act-archive on" title="Разархивировать" data-post-action="unarchive" data-post-id="${p.id}">${iconCut('unlock', 'ui-icon', 16, 16)}</button>`
+      : `<button class="act act-archive" title="Архивировать" data-post-action="archive" data-post-id="${p.id}">${iconCut('lock', 'ui-icon', 16, 16)}</button>`
     : '';
   const report = (me && me.id !== p.user_id)
-    ? `<button class="act act-report" title="Пожаловаться" onclick="showReportMenu('${p.id}',this)">⚑</button>`
+    ? `<button class="act act-report" title="Пожаловаться" data-post-action="report" data-post-id="${p.id}">${iconCut('warning', 'ui-icon', 16, 16)}</button>`
     : '';
-  const copyLink = `<button class="act" title="Копировать ссылку" onclick="copyPostLink('${p.id}')">⎘</button>`;
-  const plays = (p.play_count > 0) ? `<span class="post-plays">▶ ${p.play_count}</span>` : '';
-  const bm = me ? `<button class="act${p.bookmarked?' on':''}" title="${p.bookmarked?'Убрать из сохранённых':'Сохранить'}" onclick="togBookmark('${p.id}',this)">${p.bookmarked?'◆':'◇'}</button>` : '';
+  const copyLink = `<button class="act" title="Копировать ссылку" data-post-action="copy-link" data-post-id="${p.id}">${iconCut('share', 'ui-icon', 16, 16)}</button>`;
+  const plays = (p.play_count > 0) ? `<span class="post-plays">${iconCut('play', 'ui-icon post-plays-ic', 12, 12)}<span class="post-plays-n">${p.play_count}</span></span>` : '';
+  const bm = me ? `<button class="act${p.bookmarked?' on':''}" title="${p.bookmarked?'Убрать из сохранённых':'Сохранить'}" data-post-action="bookmark" data-post-id="${p.id}">${bookmarkIconHtml(!!p.bookmarked)}</button>` : '';
   const createdMs = new Date((p.created_at||'').replace(' ','T') + ((p.created_at||'').includes('Z')||(p.created_at||'').includes('T')?'':'Z')).getTime();
   const ageHr = (Date.now() - createdMs) / 3600000;
-  const edit = (isOwn && ageHr < 24) ? `<button class="act" title="Редактировать (Ctrl+Enter)" onclick="editPost('${p.id}')">✎</button>` : '';
+  const edit = (isOwn && ageHr < 24) ? `<button class="act" title="Редактировать (Ctrl+Enter)" data-post-action="edit" data-post-id="${p.id}">${iconCut('edit', 'ui-icon', 16, 16)}</button>` : '';
   return `
     <div class="post-actions">
       <div class="act-like-wrap">
-        <button class="act ${p.liked?'on':''}" title="Лайк" onclick="togLike('${p.id}',this)">${p.liked?'♥':'♡'}</button>${p.likes ? `<span class="act-like-count" onclick="showLikers('${p.id}')" title="Посмотреть лайки">${p.likes}</span>` : ''}
+        <button class="act ${p.liked?'on':''}" title="Лайк" data-post-action="like" data-post-id="${p.id}">${likeIconHtml(!!p.liked)}</button>${p.likes ? `<span class="act-like-count" data-post-action="likers" data-post-id="${p.id}" title="Посмотреть лайки">${p.likes}</span>` : ''}
       </div>
-      <button class="act" title="Комментарии" onclick="togCmts('${p.id}')">◇ ${p.comments||''}</button>
-      <button class="act ${p.reposted?'on':''}" title="Репост" onclick="showRepostMenu('${p.id}',this,${!!p.reposted})">↻ ${p.reposts||''}</button>
+      <button class="act act-comments" title="Комментарии" data-post-action="comments" data-post-id="${p.id}">${iconCut('comment', 'ui-icon', 15, 15)}${p.comments ? `<span class="act-side-count">${p.comments}</span>` : ''}</button>
+      <button class="act ${p.reposted?'on':''}" title="Репост" data-post-action="repost" data-post-id="${p.id}" data-reposted="${p.reposted ? '1' : '0'}">${iconCut('forward', 'ui-icon', 15, 15)}${p.reposts ? `<span class="act-side-count">${p.reposts}</span>` : ''}</button>
       ${bm}${plays}${edit}${pin}${archive}${del}${report}${copyLink}
     </div>
     <div class="post-reactions-bar" data-pid="${p.id}">
-      ${(p.post_reactions||[]).map(r => `<button class="reaction-btn${r.me?' me':''}" onclick="togglePostReact('${p.id}','${r.emoji}',this)">${r.emoji}<span>${r.count}</span></button>`).join('')}
-      <button class="reaction-add-btn-post" onclick="openPostReactPicker('${p.id}',this)" title="Реакция">＋</button>
+      ${(p.post_reactions||[]).map(r => `<button class="reaction-btn${r.me?' me':''}" data-post-action="react-toggle" data-post-id="${p.id}" data-emoji="${r.emoji}">${r.emoji}<span>${r.count}</span></button>`).join('')}
+      <button class="reaction-add-btn-post" data-post-action="react-add" data-post-id="${p.id}" title="Реакция">${iconCut('add', 'ui-icon', 14, 14)}</button>
     </div>
   `;
 }
@@ -1240,7 +1842,17 @@ async function openPostReactPicker(postId, btn) {
   const picker = document.createElement('div');
   picker.className = 'react-picker';
   picker.setAttribute('role', 'listbox');
-  picker.innerHTML = ALLOWED_POST_EMOJI.map(e => `<button type="button" class="react-picker-btn" onclick="pickPostEmoji('${postId}','${e}',this)" aria-label="Реакция ${e}">${e}</button>`).join('');
+  picker.innerHTML = ALLOWED_POST_EMOJI
+    .map(
+      e =>
+        `<button type="button" class="react-picker-btn" data-post-id="${postId}" data-emoji="${e}" aria-label="Реакция ${e}">${e}</button>`,
+    )
+    .join('');
+  picker.addEventListener('click', ev => {
+    const pickBtn = ev.target.closest('.react-picker-btn');
+    if (!pickBtn) return;
+    pickPostEmoji(pickBtn.dataset.postId || postId, pickBtn.dataset.emoji || '', pickBtn);
+  });
   const rect = btn.getBoundingClientRect();
   picker.style.top = (window.scrollY + rect.bottom + 4) + 'px';
   picker.style.left = rect.left + 'px';
@@ -1268,7 +1880,9 @@ function updateReactionsBar(bar, reactions, postId) {
   reactions.forEach(r => {
     const b = document.createElement('button');
     b.className = 'reaction-btn' + (r.me ? ' me' : '');
-    b.setAttribute('onclick', `togglePostReact('${postId}','${r.emoji}',this)`);
+    b.dataset.postAction = 'react-toggle';
+    b.dataset.postId = postId;
+    b.dataset.emoji = r.emoji;
     b.innerHTML = `${r.emoji}<span>${r.count}</span>`;
     bar.insertBefore(b, addBtn);
   });
@@ -1288,7 +1902,7 @@ async function showFollowersList(username) {
     const list = await api(`/user/${username}/followers`);
     if (!list.length) { toast('Нет подписчиков'); return; }
     showModal('Подписчики', list.map(u =>
-      `<div class="modal-user-row" onclick="closeModal();go('profile','${esc(u.username)}')">
+      `<div class="modal-user-row" data-post-action="modal-go-profile" data-username="${esc(u.username)}">
         ${avatarEl(u.avatar, 'avatar avatar-sm', initial(u.display_name))}
         <span class="modal-user-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</span>
         <span class="modal-user-handle">@${esc(u.username)}</span>
@@ -1301,7 +1915,7 @@ async function showFollowingList(username) {
     const list = await api(`/user/${username}/following`);
     if (!list.length) { toast('Нет подписок'); return; }
     showModal('Подписки', list.map(u =>
-      `<div class="modal-user-row" onclick="closeModal();go('profile','${esc(u.username)}')">
+      `<div class="modal-user-row" data-post-action="modal-go-profile" data-username="${esc(u.username)}">
         ${avatarEl(u.avatar, 'avatar avatar-sm', initial(u.display_name))}
         <span class="modal-user-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</span>
         <span class="modal-user-handle">@${esc(u.username)}</span>
@@ -1345,18 +1959,20 @@ async function unpinPost(id) {
 function initial(name) { return (name||'?')[0].toUpperCase(); }
 function verifiedBadge(isVerified, badgeType) {
   if (!isVerified) return '';
-  const label = badgeType ? badgeType.toUpperCase() : '✓';
   const title = badgeType ? `Верифицировано: ${badgeType}` : 'Верифицированный пользователь';
-  return `<span class="verified-badge" title="${esc(title)}">${esc(label)}</span>`;
+  if (badgeType) {
+    return `<span class="verified-badge" title="${esc(title)}">${esc(badgeType.toUpperCase())}</span>`;
+  }
+  return `<span class="verified-badge verified-badge--ic" title="${esc(title)}">${iconCut('check', 'ui-icon verified-badge-img', 10, 10)}</span>`;
 }
 function truncUrl(u) { return u.length > 45 ? u.slice(0, 45) + '…' : u; }
 function linkifyContent(text) {
   const escaped = esc(text);
   return escaped
     .replace(/#([a-zA-Zа-яА-ЯёЁ0-9_]+)/g, (_, tag) =>
-      `<span class="hashtag" onclick="go('hashtag','${tag.toLowerCase()}')">#${tag}</span>`)
+      `<span class="hashtag" data-post-action="go-hashtag" data-tag="${tag.toLowerCase()}">#${tag}</span>`)
     .replace(/@([a-zA-Z0-9_]{1,32})/g, (_, u) =>
-      `<span class="mention" onclick="go('profile','${u}')">@${u}</span>`);
+      `<span class="mention" data-post-action="go-profile" data-username="${u}">@${u}</span>`);
 }
 
 // ── FEED ──
@@ -1365,7 +1981,8 @@ async function renderFeed(app) {
   try {
     // Show skeleton while loading
     app.innerHTML = `
-      <div class="page-title">FEED</div>
+      ${opiumCommandStrip('feed')}
+      ${pageTitleIc('home', 'FEED')}
       ${composerHtml()}
       <div id="posts">${skeletonHtml(3)}</div>
     `;
@@ -1374,10 +1991,10 @@ async function renderFeed(app) {
     const postsEl = document.getElementById('posts');
     if (postsEl) postsEl.innerHTML = posts.length ? posts.map(postHtml).join('') :
         '<div class="onboarding-empty">' +
-        '<div class="onboarding-icon">✦</div>' +
+        `<div class="onboarding-icon">${iconCut('home', 'ui-icon', 28, 28)}</div>` +
         '<div class="onboarding-title">Лента пуста</div>' +
         '<div class="onboarding-text">Подпишись на артистов, чтобы видеть их посты здесь</div>' +
-        '<button class="btn btn-sm" onclick="go(\'discover\')" style="margin-top:1rem">ОБЗОР →</button>' +
+        '<button class="btn btn-sm btn-ic-row" data-post-action="go-discover" style="margin-top:1rem">' + iconCut('search', 'ui-icon', 14, 14) + 'ОБЗОР</button>' +
         '</div>';
     loadLinkPreviews(document.getElementById('app')).catch(()=>{});
     // initialise feed scroll state
@@ -1411,7 +2028,13 @@ async function renderDiscover(app) {
   try {
     // Show skeleton while loading
     app.innerHTML = `
-      <div class="page-title">DISCOVER</div>
+      ${opiumCommandStrip('discover')}
+      ${pageTitleIc('search', 'DISCOVER')}
+      ${opiumMetricCards([
+        { label: 'mode', value: 'public', note: 'all network posts' },
+        { label: 'sort', value: 'fresh', note: 'latest signal first' },
+        { label: 'action', value: 'react', note: 'like, save, report' },
+      ])}
       <div id="posts">${skeletonHtml(3)}</div>
     `;
     // fetch first batch of discover posts
@@ -1506,7 +2129,7 @@ function compressImage(file, maxMB = 4.5) {
             const out = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
             const from = (file.size / 1048576).toFixed(1);
             const to   = (out.size  / 1048576).toFixed(1);
-            if (out.size < file.size) toast(`↓ сжато: ${from} МБ → ${to} МБ`);
+            if (out.size < file.size) toast(`Сжато: ${from} МБ → ${to} МБ`);
             resolve(out);
           } else {
             attempt(Math.round((q - 0.1) * 10) / 10);
@@ -1621,12 +2244,12 @@ async function togLike(id, btn) {
   const curCount = parseInt(countEl?.textContent) || 0;
   // Optimistic update
   btn.classList.toggle('on');
-  btn.textContent = on ? '♡' : '♥';
+  btn.innerHTML = likeIconHtml(!on);
   if (countEl) countEl.textContent = Math.max(0, curCount + (on ? -1 : 1)) || '';
   if (!on) { btn.classList.add('like-pop'); btn.addEventListener('animationend', () => btn.classList.remove('like-pop'), {once:true}); }
   try {
     const d = await api(`/posts/${id}/like`, { method: on ? 'DELETE' : 'POST' });
-    btn.textContent = on ? '♡' : '♥';
+    btn.innerHTML = likeIconHtml(btn.classList.contains('on'));
     if (countEl) {
       countEl.textContent = d.likes || '';
     } else if (d.likes && wrap) {
@@ -1639,7 +2262,7 @@ async function togLike(id, btn) {
     }
   } catch {
     btn.classList.toggle('on');
-    btn.textContent = on ? '♥' : '♡';
+    btn.innerHTML = likeIconHtml(on);
     if (countEl) countEl.textContent = curCount || '';
   }
 }
@@ -1648,17 +2271,17 @@ async function togBookmark(id, btn) {
   if (!me) return go('login');
   const on = btn.classList.contains('on');
   btn.classList.toggle('on');
-  btn.textContent = on ? '◇' : '◆';
+  btn.innerHTML = bookmarkIconHtml(!on);
   btn.title = on ? 'Сохранить' : 'Убрать из сохранённых';
   try {
     const d = await api(`/posts/${id}/bookmark`, { method: 'POST' });
     btn.classList.toggle('on', d.bookmarked);
-    btn.textContent = d.bookmarked ? '◆' : '◇';
+    btn.innerHTML = bookmarkIconHtml(!!d.bookmarked);
     btn.title = d.bookmarked ? 'Убрать из сохранённых' : 'Сохранить';
-    toast(d.bookmarked ? 'Сохранено ◆' : 'Удалено из сохранённых');
+    toast(d.bookmarked ? 'Сохранено' : 'Удалено из сохранённых');
   } catch (e) {
     btn.classList.toggle('on');
-    btn.textContent = on ? '◆' : '◇';
+    btn.innerHTML = bookmarkIconHtml(on);
     toast.error(e.message);
   }
 }
@@ -1668,7 +2291,7 @@ async function showLikers(postId) {
     const likers = await api(`/posts/${postId}/likes`);
     if (!likers.length) { toast('Никто ещё не лайкнул'); return; }
     showModal('Лайки', likers.map(u =>
-      `<div class="modal-user-row" onclick="closeModal();go('profile','${esc(u.username)}')">
+      `<div class="modal-user-row" data-post-action="modal-go-profile" data-username="${esc(u.username)}">
         ${avatarEl(u.avatar, 'avatar avatar-sm', initial(u.display_name))}
         <span class="modal-user-name">${esc(u.display_name)}</span>
         <span class="modal-user-handle">@${esc(u.username)}</span>
@@ -1690,7 +2313,7 @@ function showModal(title, bodyHtml) {
     <div class="modal-box">
       <div class="modal-header-row">
         <span class="modal-title">${esc(title)}</span>
-        <button class="modal-close-btn" onclick="closeModal()">✕</button>
+        <button class="modal-close-btn" data-post-action="modal-close" aria-label="Закрыть">${iconCut('close', 'ui-icon', 18, 18)}</button>
       </div>
       <div class="modal-scroll-body">${bodyHtml}</div>
     </div>
@@ -1750,7 +2373,7 @@ async function renderBookmarks(app) {
   try {
     const posts = await api('/bookmarks');
     app.innerHTML = `
-      <div class="page-title">СОХРАНЁННЫЕ</div>
+      ${pageTitleIc('bookmark', 'СОХРАНЁННЫЕ')}
       <div id="posts">${posts.length ? posts.map(postHtml).join('') : '<div class="empty">Нет сохранённых постов</div>'}</div>
     `;
   } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
@@ -1773,11 +2396,11 @@ function showRepostMenu(id, btn, alreadyReposted) {
   menu.className = 'repost-menu';
   menu.dataset.pid = id;
   const repostBtn = alreadyReposted
-    ? `<button class="disabled" disabled><span>✓</span> Уже репостнул</button>`
-    : `<button onclick="repostDirect('${id}')"><span>↻</span> Репост</button>`;
+    ? `<button class="disabled" disabled>${iconCut('check', 'ui-icon', 14, 14)} Уже репостнул</button>`
+    : `<button data-post-action="repost-direct" data-post-id="${id}">${iconCut('forward', 'ui-icon', 14, 14)} Репост</button>`;
   menu.innerHTML = `
     ${repostBtn}
-    <button onclick="showQuoteCompose('${id}')"><span>✏</span> Цитата</button>
+    <button data-post-action="quote-compose" data-post-id="${id}">${iconCut('edit', 'ui-icon', 14, 14)} Цитата</button>
   `;
   document.body.appendChild(menu);
   _repostMenuEl = menu;
@@ -1806,7 +2429,7 @@ function showReportMenu(postId, btn) {
   menu.className = 'repost-menu report-menu';
   menu.dataset.pid = postId;
   menu.innerHTML = reasons.map(r =>
-    `<button onclick="submitReport('post','${postId}','${r}')">${r}</button>`
+    `<button data-post-action="submit-report" data-report-type="post" data-target-id="${postId}" data-reason="${r}">${r}</button>`
   ).join('');
   btn.parentElement.appendChild(menu);
   _reportMenuEl = menu;
@@ -1841,8 +2464,8 @@ function showQuoteCompose(postId) {
   div.innerHTML = `
     <textarea class="input" id="qt-${postId}" placeholder="Добавь комментарий к репосту..." rows="2"></textarea>
     <div class="quote-compose-actions">
-      <button class="btn-ghost" onclick="document.getElementById('qc-${postId}').remove()">ОТМЕНА</button>
-      <button class="btn btn-sm" onclick="submitQuote('${postId}')">↻ РЕПОСТ</button>
+      <button class="btn-ghost btn-ic-row" data-post-action="quote-cancel" data-post-id="${postId}">${iconCut('close', 'ui-icon', 14, 14)} ОТМЕНА</button>
+      <button class="btn btn-sm btn-ic-row" data-post-action="quote-submit" data-post-id="${postId}">${iconCut('forward', 'ui-icon', 14, 14)} РЕПОСТ</button>
     </div>
   `;
   postEl.insertAdjacentElement('afterend', div);
@@ -1871,14 +2494,14 @@ async function togCmts(id) {
     const cmts = await api(`/posts/${id}/comments`);
     let h = cmts.map(c => `
       <div class="cmt">
-        <span class="cmt-name" onclick="go('profile','${esc(c.username)}')">${esc(c.display_name)}</span>${esc(c.content)}
+        <span class="cmt-name" data-post-action="go-profile" data-username="${esc(c.username)}">${esc(c.display_name)}</span>${esc(c.content)}
         <span class="cmt-time">${timeAgo(c.created_at)}</span>
       </div>
     `).join('');
     if (me) h += `
       <div class="cmt-form">
-        <input type="text" placeholder="Комментарий..." id="ci-${id}" onkeydown="if(event.key==='Enter')sendCmt('${id}')">
-        <button class="cmt-send" onclick="sendCmt('${id}')">→</button>
+        <input type="text" placeholder="Комментарий..." id="ci-${id}" data-post-action="comment-input" data-post-id="${id}">
+        <button class="cmt-send" data-post-action="send-comment" data-post-id="${id}" aria-label="Отправить">${iconCut('send', 'ui-icon', 18, 18)}</button>
       </div>
     `;
     sec.innerHTML = h || '<div class="empty" style="padding:0.5rem 0;font-size:0.7rem">Нет комментариев</div>' + (me ? h : '');
@@ -1899,14 +2522,14 @@ async function sendCmt(id) {
       const cmts = await api(`/posts/${id}/comments`);
       let h = cmts.map(c => `
         <div class="cmt">
-          <span class="cmt-name" onclick="go('profile','${esc(c.username)}')">${esc(c.display_name)}</span>${esc(c.content)}
+          <span class="cmt-name" data-post-action="go-profile" data-username="${esc(c.username)}">${esc(c.display_name)}</span>${esc(c.content)}
           <span class="cmt-time">${timeAgo(c.created_at)}</span>
         </div>
       `).join('');
       if (me) h += `
         <div class="cmt-form">
-          <input type="text" placeholder="Комментарий..." id="ci-${id}" onkeydown="if(event.key==='Enter')sendCmt('${id}')">
-          <button class="cmt-send" onclick="sendCmt('${id}')">→</button>
+          <input type="text" placeholder="Комментарий..." id="ci-${id}" data-post-action="comment-input" data-post-id="${id}">
+          <button class="cmt-send" data-post-action="send-comment" data-post-id="${id}" aria-label="Отправить">${iconCut('send', 'ui-icon', 18, 18)}</button>
         </div>
       `;
       sec.innerHTML = h || '<div class="empty" style="padding:0.5rem 0;font-size:0.7rem">Нет комментариев</div>' + (me ? h : '');
@@ -1919,7 +2542,7 @@ async function sendCmt(id) {
 async function renderHashtag(app, tag) {
   if (!me) return go('login');
   if (!tag) return go('feed');
-  app.innerHTML = `<div class="page-title">#${esc(tag)}</div><div id="hashPosts"><div class="empty">· · ·</div></div>`;
+  app.innerHTML = `${pageTitleIcRaw('search', '#' + esc(tag))}<div id="hashPosts"><div class="empty">· · ·</div></div>`;
   try {
     const posts = await api(`/hashtag/${encodeURIComponent(tag)}`);
     const el = $('#hashPosts');
@@ -1931,17 +2554,23 @@ async function renderHashtag(app, tag) {
 async function renderArtists(app) {
   const artists = await api('/artists');
   app.innerHTML = `
-    <div class="page-title">ARTISTS</div>
-    <div class="search-wrap"><input class="input" type="text" placeholder="Поиск артистов..." oninput="searchArt(this.value)"></div>
+    ${opiumCommandStrip('search')}
+    ${opiumMetricCards([
+      { label: 'network', value: artists.length, note: 'artists inside' },
+      { label: 'access', value: 'invite', note: 'closed graph' },
+      { label: 'signal', value: 'profiles', note: 'links and posts' },
+    ])}
+    ${pageTitleIc('profile', 'ARTISTS')}
+    <div class="search-wrap"><input class="input" id="artistsSearchInput" type="text" placeholder="Поиск артистов..."></div>
     <div id="artList">${artists.length ? artists.map(artRow).join('') : '<div class="empty">Пока никого нет</div>'}</div>
   `;
+  const searchInput = document.getElementById('artistsSearchInput');
+  if (searchInput) searchInput.addEventListener('input', e => searchArt(e.target.value));
 }
 
 function artRow(a) {
   return `
-    <div class="artist-row" role="button" tabindex="0"
-      onclick="go('profile','${esc(a.username)}')"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('profile','${esc(a.username)}')}">
+    <div class="artist-row" role="button" tabindex="0" data-post-action="go-profile" data-username="${esc(a.username)}">
       ${avatarEl(a.avatar, 'avatar', initial(a.display_name))}
       <div class="artist-info">
         <div class="artist-name">@${esc(a.username)}${verifiedBadge(a.is_verified, a.badge_type)}</div>
@@ -1969,33 +2598,111 @@ function searchArt(q) {
 // ── SEARCH ──
 async function renderSearch(app, initQuery) {
   if (!me) return go('login');
-  let activeTab = 'users';
+  let activeTab = 'all';
+  let kbIndex = -1;
+  let recentSearches = [];
+  const searchCoreHeader = `
+    ${opiumCommandStrip('search')}
+    ${opiumMetricCards([
+      { label: 'scope', value: 'all', note: 'users, posts, dm, files' },
+      { label: 'keys', value: 'up/down', note: 'keyboard navigation' },
+      { label: 'jump', value: 'enter', note: 'open result fast' },
+    ])}`;
+  try {
+    recentSearches = JSON.parse(localStorage.getItem('search_recent_queries') || '[]');
+    if (!Array.isArray(recentSearches)) recentSearches = [];
+  } catch { recentSearches = []; }
+  const persistRecent = q => {
+    if (!q || q.length < 2) return;
+    recentSearches = [q, ...recentSearches.filter(x => x !== q)].slice(0, 8);
+    try { localStorage.setItem('search_recent_queries', JSON.stringify(recentSearches)); } catch {}
+  };
   app.innerHTML = `
-    <div class="page-title">ПОИСК</div>
+    ${searchCoreHeader}
+    ${pageTitleIc('search', 'ПОИСК')}
     <div class="search-bar">
       <input class="input" id="searchInput" placeholder="Введи запрос..." value="${esc(initQuery||'')}" autocomplete="off" autocorrect="off" spellcheck="false">
     </div>
     <div class="search-tabs">
-      <button class="search-tab active" data-tab="users" onclick="switchSearchTab('users')">ЛЮДИ</button>
-      <button class="search-tab" data-tab="posts" onclick="switchSearchTab('posts')">ПОСТЫ</button>
-      <button class="search-tab" data-tab="messages" onclick="switchSearchTab('messages')">СООБЩЕНИЯ</button>
+      <button class="search-tab active" data-post-action="search-tab" data-tab="all">${iconCut('search', 'ui-icon', 12, 12)} ВСЕ</button>
+      <button class="search-tab" data-post-action="search-tab" data-tab="users">${iconCut('profile', 'ui-icon', 12, 12)} ЛЮДИ</button>
+      <button class="search-tab" data-post-action="search-tab" data-tab="posts">${iconCut('home', 'ui-icon', 12, 12)} ПОСТЫ</button>
+      <button class="search-tab" data-post-action="search-tab" data-tab="messages">${iconCut('comment', 'ui-icon', 12, 12)} СООБЩЕНИЯ</button>
+      <button class="search-tab" data-post-action="search-tab" data-tab="files">${iconCut('disk', 'ui-icon', 12, 12)} ФАЙЛЫ</button>
     </div>
+    <div id="searchRecent" class="search-recent"></div>
     <div id="searchResults"></div>
   `;
   const input = $('#searchInput');
+  const recentEl = $('#searchRecent');
+  const renderRecent = () => {
+    if (!recentEl) return;
+    if (!recentSearches.length || (input.value || '').trim().length >= 2) {
+      recentEl.innerHTML = '';
+      return;
+    }
+    recentEl.innerHTML = `<div class="search-recent-label">Недавние:</div>${recentSearches.map(q =>
+      `<button class="search-recent-chip" data-post-action="search-recent-chip" data-query="${esc(q)}">${esc(q)}</button>`
+    ).join('')}`;
+  };
   let searchTimer = null;
   input.addEventListener('input', () => {
+    kbIndex = -1;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => runSearch(activeTab), 350);
+    renderRecent();
   });
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(activeTab); } });
-  window.switchSearchTab = t => {
+  input.addEventListener('keydown', e => {
+    const items = $$('#searchResults .search-kb-item');
+    if (e.key === 'ArrowDown' && items.length) {
+      e.preventDefault();
+      kbIndex = (kbIndex + 1 + items.length) % items.length;
+      items.forEach((it, i) => it.classList.toggle('search-kb-active', i === kbIndex));
+      items[kbIndex]?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (e.key === 'ArrowUp' && items.length) {
+      e.preventDefault();
+      kbIndex = (kbIndex - 1 + items.length) % items.length;
+      items.forEach((it, i) => it.classList.toggle('search-kb-active', i === kbIndex));
+      items[kbIndex]?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (e.key === 'Enter' && kbIndex >= 0 && items[kbIndex]) {
+      e.preventDefault();
+      items[kbIndex].click();
+      return;
+    }
+    if (e.key === 'Enter') {
+      clearTimeout(searchTimer);
+      runSearch(activeTab);
+    }
+  });
+  const switchSearchTab = t => {
     activeTab = t;
     $$('.search-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
     runSearch(t);
   };
+  const tabsWrap = app.querySelector('.search-tabs');
+  if (tabsWrap) {
+    tabsWrap.addEventListener('click', e => {
+      const btn = e.target.closest('[data-post-action="search-tab"]');
+      if (!btn) return;
+      switchSearchTab(btn.dataset.tab || 'all');
+    });
+  }
+  app.addEventListener('click', e => {
+    const chip = e.target.closest('[data-post-action="search-recent-chip"]');
+    if (!chip) return;
+    input.value = chip.dataset.query || '';
+    kbIndex = -1;
+    runSearch(activeTab);
+  });
   if (initQuery) runSearch(activeTab);
-  else setTimeout(() => input.focus(), 50);
+  else {
+    setTimeout(() => input.focus(), 50);
+    renderRecent();
+  }
 
   async function runSearch(tab) {
     const q = input.value.trim();
@@ -2011,42 +2718,49 @@ async function renderSearch(app, initQuery) {
         el.innerHTML = posts.length ? posts.map(postHtml).join('') : '<div class="empty">Постов с таким тегом не найдено</div>';
         return;
       }
-      if (tab === 'messages') {
-        let msgResults = [];
-        try { msgResults = await api(`/search/messages?q=${encodeURIComponent(q)}`); } catch {}
-        if (!msgResults.length) { el.innerHTML = '<div class="empty">Сообщений не найдено</div>'; return; }
-        let html = '<div class="search-section">';
-        msgResults.forEach(m => {
-          const chatName = m.is_group ? (m.title || 'Группа') : (m.other_name || 'Диалог');
-          html += `<div class="artist-row" style="cursor:pointer" role="button" tabindex="0"
-            onclick="jumpToMessage('${esc(m.id)}','${esc(m.conv_id)}')"
-            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();jumpToMessage('${esc(m.id)}','${esc(m.conv_id)}')}">
-            ${avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))}
-            <div class="artist-info">
-              <div class="artist-name" style="font-size:12px;color:var(--muted)">${esc(chatName)} · ${esc(m.display_name)}</div>
-              <div class="artist-bio">${esc((m.content||'').slice(0,80))}</div>
-            </div>
-          </div>`;
-        });
-        html += '</div>';
-        el.innerHTML = html;
-        return;
-      }
       const r = await api(`/search?q=${encodeURIComponent(q)}&type=${tab}`);
       let html = '';
       if (tab === 'users') {
         html = r.users.length
-          ? r.users.map(u => `<div class="artist-row" role="button" tabindex="0"
-              onclick="go('profile','${esc(u.username)}')"
-              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('profile','${esc(u.username)}')}">
+          ? r.users.map(u => `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-profile" data-username="${esc(u.username)}">
               ${avatarEl(u.avatar,'avatar-sm',initial(u.display_name))}
               <div class="artist-info"><div class="artist-name">${esc(u.display_name)}</div><div class="artist-handle">@${esc(u.username)}</div></div>
             </div>`).join('')
           : '<div class="empty">Никого не найдено</div>';
       } else if (tab === 'posts') {
         html = r.posts.length ? r.posts.map(postHtml).join('') : '<div class="empty">Постов не найдено</div>';
+      } else if (tab === 'messages') {
+        html = r.messages?.length ? r.messages.map(m => {
+          const chatName = m.is_group ? (m.title || 'Группа') : (m.other_name || 'Диалог');
+          return `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="jump-to-message" data-msg-id="${esc(m.id)}" data-conv-id="${esc(m.conv_id)}">
+            ${avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))}
+            <div class="artist-info">
+              <div class="artist-name" style="font-size:12px;color:var(--muted)">${esc(chatName)} · ${esc(m.display_name)}</div>
+              <div class="artist-bio">${esc((m.content||'').slice(0,80))}</div>
+            </div>
+          </div>`;
+        }).join('') : '<div class="empty">Сообщений не найдено</div>';
+      } else if (tab === 'files') {
+        html = r.files?.length ? r.files.map(f => `
+          <div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-disk">
+            <div class="artist-info">
+              <div class="artist-name">${esc(f.name)}</div>
+              <div class="artist-bio">${fmtBytes(f.size || 0)} · ${esc((f.description || '').slice(0,80)) || 'Файл на диске'}</div>
+            </div>
+          </div>
+        `).join('') : '<div class="empty">Файлов не найдено</div>';
+      } else {
+        const blocks = [];
+        if (r.users?.length) blocks.push(`<div class="search-section"><div class="search-section-title">ЛЮДИ</div>${r.users.map(u => `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-profile" data-username="${esc(u.username)}">${avatarEl(u.avatar,'avatar-sm',initial(u.display_name))}<div class="artist-info"><div class="artist-name">${esc(u.display_name)}</div><div class="artist-handle">@${esc(u.username)}</div></div></div>`).join('')}</div>`);
+        if (r.messages?.length) blocks.push(`<div class="search-section"><div class="search-section-title">СООБЩЕНИЯ</div>${r.messages.map(m => `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="jump-to-message" data-msg-id="${esc(m.id)}" data-conv-id="${esc(m.conv_id)}"><div class="artist-info"><div class="artist-name">${esc(m.display_name)}</div><div class="artist-bio">${esc((m.content||'').slice(0,80))}</div></div></div>`).join('')}</div>`);
+        if (r.files?.length) blocks.push(`<div class="search-section"><div class="search-section-title">ФАЙЛЫ</div>${r.files.map(f => `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-disk"><div class="artist-info"><div class="artist-name">${esc(f.name)}</div><div class="artist-bio">${fmtBytes(f.size || 0)}</div></div></div>`).join('')}</div>`);
+        if (r.posts?.length) blocks.push(`<div class="search-section"><div class="search-section-title">ПОСТЫ</div>${r.posts.map(postHtml).join('')}</div>`);
+        html = blocks.join('') || '<div class="empty">Ничего не найдено</div>';
       }
       el.innerHTML = html;
+      persistRecent(q);
+      renderRecent();
+      kbIndex = -1;
     } catch { el.innerHTML = '<div class="empty">Ошибка поиска</div>'; }
   }
 }
@@ -2069,20 +2783,20 @@ async function renderProfile(app, username) {
 
     let btns = '';
     if (isMe) {
-      btns = `<button class="btn btn-sm btn-ghost" onclick="go('settings')">EDIT</button>`;
+      btns = `<button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="go-settings" title="Настройки">${iconCut('settings', 'ui-icon', 15, 15)}</button>`;
     } else if (me) {
       const followBtn = u.is_following
-        ? `<button class="btn btn-sm btn-ghost" onclick="unfollow('${u.id}','${username}')">FOLLOWING</button>`
+        ? `<button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="unfollow-user" data-user-id="${u.id}" data-username="${esc(username)}" title="Отписаться">${iconCut('remove', 'ui-icon', 15, 15)}</button>`
         : u.is_pending
-        ? `<button class="btn btn-sm btn-ghost" onclick="unfollow('${u.id}','${username}')" title="Запрос отправлен">PENDING</button>`
-        : `<button class="btn btn-sm" onclick="doFollow('${u.id}','${username}')">FOLLOW</button>`;
-      const msgBtn = !u.blocks_me ? `<button class="btn btn-sm" onclick="startChat('${u.id}','${u.username}')">MESSAGE</button>` : '';
+        ? `<button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="unfollow-user" data-user-id="${u.id}" data-username="${esc(username)}" title="Запрос отправлен">${iconCut('close', 'ui-icon', 15, 15)}</button>`
+        : `<button class="btn btn-sm btn-ic-pad" data-post-action="follow-user" data-user-id="${u.id}" data-username="${esc(username)}" title="Подписаться">${iconCut('add', 'ui-icon', 15, 15)}</button>`;
+      const msgBtn = !u.blocks_me ? `<button class="btn btn-sm btn-ic-pad" data-post-action="start-chat" data-user-id="${u.id}" data-username="${esc(u.username)}" title="Написать">${iconCut('comment', 'ui-icon', 15, 15)}</button>` : '';
       const blockBtn = u.is_blocked
-        ? `<button class="btn btn-sm btn-ghost btn-block-tog" onclick="unblockUser('${esc(username)}')">РАЗБЛОК</button>`
-        : `<button class="btn btn-sm btn-ghost btn-block-tog" onclick="blockUser('${esc(username)}')">БЛОК</button>`;
+        ? `<button class="btn btn-sm btn-ghost btn-block-tog btn-ic-pad" data-post-action="unblock-user" data-username="${esc(username)}" title="Разблокировать">${iconCut('unlock', 'ui-icon', 15, 15)}</button>`
+        : `<button class="btn btn-sm btn-ghost btn-block-tog btn-ic-pad" data-post-action="block-user" data-username="${esc(username)}" title="Заблокировать">${iconCut('lock', 'ui-icon', 15, 15)}</button>`;
       const muteBtn = u.is_muted
-        ? `<button class="btn btn-sm btn-ghost" onclick="unmuteUser('${esc(username)}')">РАЗМЬЮТ</button>`
-        : `<button class="btn btn-sm btn-ghost" style="color:var(--fg3)" onclick="muteUser('${esc(username)}')">МЬЮ́Т</button>`;
+        ? `<button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="unmute-user" data-username="${esc(username)}" title="Включить в ленте">${iconCut('notifications', 'ui-icon', 15, 15)}</button>`
+        : `<button class="btn btn-sm btn-ghost btn-ic-pad" style="color:var(--fg3)" data-post-action="mute-user" data-username="${esc(username)}" title="Скрыть из ленты">${iconCut('mute', 'ui-icon', 15, 15)}</button>`;
       const blockedNotice = u.blocks_me ? `<div class="profile-blocked-notice">Этот пользователь тебя заблокировал</div>` : '';
       btns = (u.is_blocked ? blockBtn : followBtn + msgBtn + blockBtn + muteBtn) + blockedNotice;
     }
@@ -2094,34 +2808,41 @@ async function renderProfile(app, username) {
     app.innerHTML = `
       <div class="profile-top">
         ${isMe ? `
-          <div class="avatar avatar-lg profile-ava-wrap" onclick="document.getElementById('profileAvaFile').click()">
+          <div class="avatar avatar-lg profile-ava-wrap" data-post-action="profile-avatar-pick">
             ${u.avatar ? `<img src="${u.avatar}" loading="lazy" alt="">` : initial(u.display_name)}
-            <div class="profile-ava-overlay">◈</div>
+            <div class="profile-ava-overlay">${iconCut('camera', 'ui-icon', 18, 18)}</div>
           </div>
-          <input type="file" id="profileAvaFile" accept="image/*,.heic,.heif" style="display:none" onchange="upAvaProfile()">
+          <input type="file" id="profileAvaFile" accept="image/*,.heic,.heif" style="display:none">
         ` : avatarEl(u.avatar, 'avatar avatar-lg', initial(u.display_name))}
         <div class="profile-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</div>
         <div class="profile-handle">@${esc(u.username)}</div>
         ${u.bio ? `<div class="profile-bio">${esc(u.bio)}</div>` : ''}
         <div class="profile-nums">
-          <div onclick="showPostsCount()" style="cursor:${u.posts>0?'pointer':'default'}"><strong>${u.posts}</strong>POSTS</div>
-          <div onclick="showFollowersList('${esc(u.username)}')" style="cursor:${u.followers>0?'pointer':'default'}"><strong>${u.followers}</strong>FOLLOWERS</div>
-          <div onclick="showFollowingList('${esc(u.username)}')" style="cursor:${u.following>0?'pointer':'default'}"><strong>${u.following}</strong>FOLLOWING</div>
+          <div class="profile-num" data-post-action="show-posts-count" style="cursor:${u.posts>0?'pointer':'default'}"><strong>${u.posts}</strong><span class="profile-num-lbl">${iconCut('home', 'ui-icon profile-num-ic', 11, 11)}POSTS</span></div>
+          <div class="profile-num" data-post-action="show-followers" data-username="${esc(u.username)}" style="cursor:${u.followers>0?'pointer':'default'}"><strong>${u.followers}</strong><span class="profile-num-lbl">${iconCut('profile', 'ui-icon profile-num-ic', 11, 11)}FOLLOWERS</span></div>
+          <div class="profile-num" data-post-action="show-following" data-username="${esc(u.username)}" style="cursor:${u.following>0?'pointer':'default'}"><strong>${u.following}</strong><span class="profile-num-lbl">${iconCut('forward', 'ui-icon profile-num-ic', 11, 11)}FOLLOWING</span></div>
         </div>
         ${links.length ? `<div class="profile-socials">${links.join('')}</div>` : ''}
         <div class="profile-btns">${btns}</div>
       </div>
+      ${opiumMetricCards([
+        { label: 'posts', value: u.posts || 0, note: 'public output' },
+        { label: 'tracks', value: trackPosts.length, note: 'audio signal' },
+        { label: 'links', value: links.length, note: 'outside presence' },
+      ])}
       <div class="profile-tabs">
-        <button class="profile-tab active" onclick="switchProfileTab(this,'postsTab')">ПОСТЫ</button>
-        <button class="profile-tab" onclick="switchProfileTab(this,'tracksTab')">ТРЕКИ ${trackPosts.length ? `<span class="tab-count">${trackPosts.length}</span>` : ''}</button>
-        ${isMe ? `<button class="profile-tab" onclick="switchProfileTab(this,'bmTab')">СОХРАНЁННЫЕ</button>` : ''}
-        ${isMe && archivedPosts.length ? `<button class="profile-tab" onclick="switchProfileTab(this,'archTab')">АРХИВ <span class="tab-count">${archivedPosts.length}</span></button>` : ''}
+        <button class="profile-tab active" data-post-action="profile-tab" data-tab-id="postsTab">${iconCut('home', 'ui-icon', 12, 12)}ПОСТЫ</button>
+        <button class="profile-tab" data-post-action="profile-tab" data-tab-id="tracksTab">${iconCut('mic', 'ui-icon', 12, 12)}ТРЕКИ${trackPosts.length ? ` <span class="tab-count">${trackPosts.length}</span>` : ''}</button>
+        ${isMe ? `<button class="profile-tab" data-post-action="profile-tab" data-tab-id="bmTab">${iconCut('bookmark', 'ui-icon', 12, 12)}СОХРАНЁННЫЕ</button>` : ''}
+        ${isMe && archivedPosts.length ? `<button class="profile-tab" data-post-action="profile-tab" data-tab-id="archTab">${iconCut('lock', 'ui-icon', 12, 12)}АРХИВ <span class="tab-count">${archivedPosts.length}</span></button>` : ''}
       </div>
       <div id="postsTab">${allPosts.filter(p=>!p.archived).length ? allPosts.filter(p=>!p.archived).map(postHtml).join('') : '<div class="empty">Нет постов</div>'}</div>
       <div id="tracksTab" class="hidden">${trackPosts.length ? trackPosts.map(postHtml).join('') : '<div class="empty">Нет треков</div>'}</div>
       ${isMe ? `<div id="bmTab" class="hidden"><div class="empty empty-big">· · ·</div></div>` : ''}
       ${isMe && archivedPosts.length ? `<div id="archTab" class="hidden">${archivedPosts.map(postHtml).join('')}</div>` : ''}
     `;
+    const profileAvaFile = document.getElementById('profileAvaFile');
+    if (profileAvaFile) profileAvaFile.addEventListener('change', upAvaProfile);
     loadLinkPreviews(app).catch(()=>{});
   } catch { app.innerHTML = '<div class="empty">Артист не найден</div>'; }
 }
@@ -2136,7 +2857,7 @@ async function upAvaProfile() {
     // update avatar in place
     const wrap = document.querySelector('.profile-ava-wrap');
     if (wrap) {
-      wrap.innerHTML = `<img src="${d.avatar}" loading="lazy" alt=""><div class="profile-ava-overlay">◈</div>`;
+      wrap.innerHTML = `<img src="${d.avatar}" loading="lazy" alt=""><div class="profile-ava-overlay">${iconCut('camera', 'ui-icon', 18, 18)}</div>`;
     }
     toast.success('Фото обновлено');
   } catch (e) { toast.error(e.message); }
@@ -2200,7 +2921,7 @@ async function renderSettings(app) {
   let u;
   try { u = await api('/me'); } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   app.innerHTML = `
-    <div class="page-title">НАСТРОЙКИ</div>
+    ${pageTitleIc('settings', 'НАСТРОЙКИ')}
     <div class="settings">
 
       <!-- ── ПРОФИЛЬ ── -->
@@ -2210,9 +2931,9 @@ async function renderSettings(app) {
           ${avatarEl(u.avatar, 'avatar avatar-lg', initial(u.display_name))}
           <div class="settings-avatar-info">
             <span class="settings-username">@${esc(u.username)}</span>
-            <button class="btn btn-sm btn-ghost" onclick="$('#avaFile').click()">ИЗМЕНИТЬ ФОТО</button>
+            <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="settings-avatar-pick">${iconCut('camera', 'ui-icon', 14, 14)}ИЗМЕНИТЬ ФОТО</button>
           </div>
-          <input type="file" id="avaFile" accept="image/*,.heic,.heif" style="display:none" onchange="upAva()">
+          <input type="file" id="avaFile" accept="image/*,.heic,.heif" style="display:none">
         </div>
         <div class="field">
           <label>ИМЯ <span class="field-hint-inline">· видно всем в ленте и профиле</span></label>
@@ -2283,15 +3004,15 @@ async function renderSettings(app) {
             <div class="stg-toggle-desc">Получай уведомления о новых сообщениях и активности, даже когда вкладка закрыта</div>
           </div>
           <label class="toggle-wrap" id="pushToggleWrap">
-            <input type="checkbox" id="sPush" onchange="togglePushNotifications(this.checked)">
+            <input type="checkbox" id="sPush">
             <span class="toggle-track"></span>
           </label>
         </div>
       </div>
 
       <div class="gap-row">
-        <button class="btn" onclick="saveProfile()">СОХРАНИТЬ</button>
-        <button class="btn btn-ghost" onclick="doLogout()">ВЫЙТИ</button>
+        <button class="btn btn-ic-row" data-post-action="save-profile">${iconCut('check', 'ui-icon', 15, 15)}СОХРАНИТЬ</button>
+        <button class="btn btn-ghost btn-ic-row" data-post-action="do-logout">${iconCut('lock', 'ui-icon', 15, 15)}ВЫЙТИ</button>
       </div>
 
       <!-- ── ИНВАЙТ-КОД ── -->
@@ -2300,7 +3021,7 @@ async function renderSettings(app) {
         <div class="stg-toggle-desc" style="margin-bottom:0.5rem">Поделись с другом — он укажет при регистрации</div>
         <div class="invite-row">
           <span class="invite-code" id="sInviteCode">${esc(u.invite_code || '—')}</span>
-          <button class="btn btn-sm btn-ghost" onclick="rotateInvite()">↻ ОБНОВИТЬ</button>
+          <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="rotate-invite">${iconCut('download', 'ui-icon', 13, 13)}SYNC</button>
         </div>
       </div>
 
@@ -2310,8 +3031,8 @@ async function renderSettings(app) {
         <div class="stg-toggle-desc" style="margin-bottom:0.75rem">Активные сессии (все устройства где ты залогинен)</div>
         <div id="sessionsList"><div class="empty" style="font-size:0.7rem">· · ·</div></div>
         <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
-          <button class="btn btn-sm btn-ghost" onclick="loadSessions()">↻ ОБНОВИТЬ</button>
-          <button class="btn btn-sm btn-ghost" style="border-color:var(--red);color:var(--red)" onclick="revokeOtherSessions()">ВЫЙТИ НА ВСЕХ ДРУГИХ</button>
+          <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="load-sessions">${iconCut('download', 'ui-icon', 13, 13)}SYNC</button>
+          <button class="btn btn-sm btn-ghost btn-ic-row" style="border-color:var(--red);color:var(--red)" data-post-action="revoke-other-sessions">${iconCut('remove', 'ui-icon', 13, 13)}ВЫЙТИ НА ВСЕХ ДРУГИХ</button>
         </div>
       </div>
 
@@ -2334,7 +3055,7 @@ async function renderSettings(app) {
             <textarea class="input" id="vReason" rows="3" placeholder="Кратко объясни, почему хочешь верификацию..."></textarea>
           </div>
           <div id="vReqErr" class="msg-err" style="margin-bottom:0.5rem"></div>
-          <button class="btn btn-sm" onclick="submitVerifyRequest()">ПОДАТЬ ЗАЯВКУ</button>
+          <button class="btn btn-sm btn-ic-row" id="submitVerifyRequestBtn" data-post-action="submit-verify-request">${iconCut('forward', 'ui-icon', 14, 14)}ПОДАТЬ ЗАЯВКУ</button>
         `}
       </div>
 
@@ -2342,17 +3063,17 @@ async function renderSettings(app) {
       <div class="settings-section">
         <div class="settings-section-title">БЕЗОПАСНОСТЬ</div>
         <div class="field"><label>ТЕКУЩИЙ ПАРОЛЬ</label><input class="input" id="sOld" type="password" placeholder="Введи текущий пароль" autocomplete="current-password"></div>
-        <div class="field"><label>НОВЫЙ ПАРОЛЬ</label><input class="input" id="sNew" type="password" placeholder="Мин. 8 символов" autocomplete="new-password" oninput="checkPwStrength(this.value)"><div id="pwStrength" class="pw-strength"></div></div>
+        <div class="field"><label>НОВЫЙ ПАРОЛЬ</label><input class="input" id="sNew" type="password" placeholder="Мин. 8 символов" autocomplete="new-password"><div id="pwStrength" class="pw-strength"></div></div>
         <div class="field"><label>ПОВТОРИ НОВЫЙ</label><input class="input" id="sNew2" type="password" placeholder="Ещё раз новый пароль" autocomplete="new-password"></div>
         <div class="gap-row mt">
-          <button class="btn btn-sm" onclick="changePassword()">СМЕНИТЬ ПАРОЛЬ</button>
+          <button class="btn btn-sm btn-ic-row" data-post-action="change-password">${iconCut('lock', 'ui-icon', 14, 14)}СМЕНИТЬ ПАРОЛЬ</button>
         </div>
         <div class="stg-danger-row">
-          <button class="btn btn-sm btn-ghost" onclick="exportData()">↓ ЭКСПОРТ ДАННЫХ</button>
+          <button class="btn btn-sm btn-ghost btn-ic-row stg-export-data" data-post-action="export-data">${iconCut('download', 'ui-icon', 16, 16)}ЭКСПОРТ ДАННЫХ</button>
           <span class="stg-toggle-desc">Скачать все свои посты, сообщения и файлы в JSON</span>
         </div>
         <div class="stg-danger-row">
-          <button class="btn btn-sm btn-danger" onclick="deleteAccount()">УДАЛИТЬ АККАУНТ</button>
+          <button class="btn btn-sm btn-danger btn-ic-row" data-post-action="delete-account">${iconCut('trash', 'ui-icon', 14, 14)}УДАЛИТЬ АККАУНТ</button>
           <span class="stg-toggle-desc">Удаляет все данные — необратимо</span>
         </div>
       </div>
@@ -2364,6 +3085,12 @@ async function renderSettings(app) {
     document.querySelectorAll('.settings .input').forEach(el =>
       el.addEventListener('input', () => { dirtySettings = true; })
     );
+    const newPassInput = document.getElementById('sNew');
+    if (newPassInput) newPassInput.addEventListener('input', e => checkPwStrength(e.target.value));
+    const avaFileInput = document.getElementById('avaFile');
+    if (avaFileInput) avaFileInput.addEventListener('change', upAva);
+    const pushToggle = document.getElementById('sPush');
+    if (pushToggle) pushToggle.addEventListener('change', e => togglePushNotifications(e.target.checked));
     initPushState();
     loadSessions();
   }, 50);
@@ -2425,7 +3152,7 @@ async function submitVerifyRequest() {
   try {
     await api('/verify-request', { method:'POST', body:{ badge_type, reason } });
     toast.success('Заявка отправлена');
-    const btn = document.querySelector('[onclick="submitVerifyRequest()"]');
+    const btn = document.getElementById('submitVerifyRequestBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'ЗАЯВКА ОТПРАВЛЕНА'; }
   } catch (e) {
     if (errEl) errEl.textContent = e.message || 'Ошибка';
@@ -2510,7 +3237,7 @@ async function renderNotifs(app) {
   let notifs;
   try { notifs = await api('/notifications'); } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   me.notif_count = 0; renderNav();
-  if (!notifs.length) { app.innerHTML = '<div class="page-title">УВЕДОМЛЕНИЯ</div><div class="onboarding-empty"><div class="onboarding-icon">🔔</div><div class="onboarding-title">Всё тихо</div><div class="onboarding-text">Здесь будут лайки, комментарии и новые подписчики</div></div>'; return; }
+  if (!notifs.length) { app.innerHTML = `${pageTitleIc('notifications', 'УВЕДОМЛЕНИЯ', 16, 16)}<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('notifications', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Всё тихо</div><div class="onboarding-text">Здесь будут лайки, комментарии и новые подписчики</div></div>`; return; }
 
   const typeMap = { like: '♥ лайкнул пост', comment: '🥀 прокомментировал', follow: '→ подписался', repost: '↻ репостнул', dm: '✦ прислал сообщение', follow_request: 'хочет подписаться на тебя' };
   // Aggregate DM notifications: one entry per conversation
@@ -2523,9 +3250,9 @@ async function renderNotifs(app) {
     return true;
   });
   app.innerHTML = `
-    <div class="page-title">УВЕДОМЛЕНИЯ</div>
+    ${pageTitleIc('notifications', 'УВЕДОМЛЕНИЯ', 16, 16)}
     ${dedupedNotifs.map(n => `
-      <div class="artist-row" onclick="${n.type==='dm' && n.ref_id ? `go('chat','${esc(n.ref_id)}')` : `go('profile','${esc(n.username)}')`}" style="cursor:pointer">
+      <div class="artist-row" data-post-action="${n.type==='dm' && n.ref_id ? 'go-chat' : 'go-profile'}" data-conv-id="${esc(n.ref_id || '')}" data-username="${esc(n.username || '')}" style="cursor:pointer">
         ${avatarEl(n.avatar, 'avatar', initial(n.display_name))}
         <div class="artist-info">
           <div class="artist-name">${esc(n.display_name)}</div>
@@ -2542,12 +3269,12 @@ async function renderNotifs(app) {
       <div class="notif-row follow-req-row">
         ${avatarEl(r.avatar, 'avatar avatar-sm', initial(r.display_name))}
         <div class="notif-text">
-          <strong onclick="go('profile','${esc(r.username)}')" style="cursor:pointer">@${esc(r.username)}</strong>
+          <strong data-post-action="go-profile" data-username="${esc(r.username)}" style="cursor:pointer">@${esc(r.username)}</strong>
           хочет подписаться на тебя
         </div>
         <div style="display:flex;gap:0.4rem;margin-left:auto">
-          <button class="btn btn-sm" onclick="acceptFollowReq('${esc(r.id)}',this)">✓</button>
-          <button class="btn btn-sm btn-ghost" onclick="declineFollowReq('${esc(r.id)}',this)">✕</button>
+          <button class="btn btn-sm btn-ic-pad" data-post-action="accept-follow-req" data-request-id="${esc(r.id)}" aria-label="Принять">${iconCut('check', 'ui-icon', 15, 15)}</button>
+          <button class="btn btn-sm btn-ghost" data-post-action="decline-follow-req" data-request-id="${esc(r.id)}" aria-label="Отклонить">${iconCut('close', 'ui-icon', 15, 15)}</button>
         </div>
       </div>`).join('');
     app.insertAdjacentHTML('afterbegin', `<div class="follow-reqs-section">${reqHtml}</div>`);
@@ -2573,8 +3300,8 @@ function showCreateGroupModal() {
       <div class="field-hint" style="margin:0.5rem 0 0.25rem">Участники (через запятую, @username):</div>
       <textarea class="input" id="gmMembers" rows="3" placeholder="@username1, @username2"></textarea>
       <div class="modal-btns">
-        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('groupModal').remove()">ОТМЕНА</button>
-        <button class="btn btn-sm" onclick="createGroup()">СОЗДАТЬ</button>
+        <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="close-group-modal">${iconCut('close', 'ui-icon', 14, 14)}ОТМЕНА</button>
+        <button class="btn btn-sm btn-ic-row" data-post-action="create-group">${iconCut('add', 'ui-icon', 14, 14)}СОЗДАТЬ</button>
       </div>
     </div>
   `;
@@ -2605,7 +3332,7 @@ async function createGroup() {
   } catch (e) { toast.error(e.message); }
 }
 
-function chatRow(c) {
+function chatRow(c, activeId = '') {
   const unread = c.unread || 0;
   // Determine display name and avatar(s)
   let name = '';
@@ -2635,25 +3362,32 @@ function chatRow(c) {
       if (m.file_type && m.file_type.startsWith('image/')) {
         lastHtml = `<img src="${esc(m.file)}" class="chat-thumb" alt="">`;
       } else if (m.file_type && m.file_type.startsWith('video/')) {
-        lastHtml = '🎬 видео';
+        lastHtml = `<span class="chat-preview-kind">${iconCut('media', 'ui-icon chat-preview-ic', 12, 12)}видео</span>`;
       } else if (m.file_type && m.file_type.startsWith('audio/')) {
-        lastHtml = '◉ голосовое';
+        lastHtml = `<span class="chat-preview-kind">${iconCut('mic', 'ui-icon chat-preview-ic', 12, 12)}голосовое</span>`;
       } else {
-        lastHtml = '[file]';
+        lastHtml = `<span class="chat-preview-kind">${iconCut('file', 'ui-icon chat-preview-ic', 12, 12)}файл</span>`;
       }
     }
   }
   const isPending = c.my_accepted === false;
   const hasDraft = !!localStorage.getItem(`draft_${c.id}`);
   const rowTime = formatChatListTime(m?.created_at);
+  const isMuted = !!(c.muted_until && new Date(c.muted_until) > new Date());
+  const isPinned = chatIsPinned(c);
+  const isArchived = !!c.archived_at;
   return `
-    <div class="chat-row${isPending ? ' chat-row-pending' : ''}" onclick="go('chat','${c.id}')" role="link" tabindex="0"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('chat','${c.id}');}">
+    <div class="chat-row${isPending ? ' chat-row-pending' : ''}${activeId && c.id === activeId ? ' chat-row-active' : ''}" data-post-action="go-chat" data-conv-id="${c.id}" role="link" tabindex="0">
       <div class="chat-row-avatar">${avatarHtml}</div>
       <div class="chat-row-body">
         <div class="chat-row-top">
           <span class="chat-name">${esc(name)}${hasDraft ? '<span class="chat-draft-note">черновик</span>' : ''}</span>
-          ${rowTime ? `<span class="chat-row-time">${esc(rowTime)}</span>` : ''}
+          <span class="chat-row-meta">
+            ${isPinned ? `<span class="chat-row-icon" title="Закреплен">${iconCut('pin', 'ui-icon', 11, 11)}</span>` : ''}
+            ${isArchived ? `<span class="chat-row-icon" title="Архив">${iconCut('disk', 'ui-icon', 11, 11)}</span>` : ''}
+            ${isMuted ? `<span class="chat-row-icon" title="Без звука">${iconCut('mute', 'ui-icon', 11, 11)}</span>` : ''}
+            ${rowTime ? `<span class="chat-row-time">${esc(rowTime)}</span>` : ''}
+          </span>
         </div>
         <div class="chat-last">${lastHtml}</div>
       </div>
@@ -2662,6 +3396,15 @@ function chatRow(c) {
       </div>
     </div>
   `;
+}
+
+function chatEmptyStateHtml(title = 'чат', conv = null) {
+  const label = conv?.is_group ? 'Начните разговор в группе' : 'Напишите первое сообщение';
+  return `<div class="chat-empty-state">
+    <div class="chat-empty-icon">${iconCut(conv?.is_group ? 'comment' : 'send', 'ui-icon', 28, 28)}</div>
+    <div class="chat-empty-title">${esc(title || 'Чат')}</div>
+    <div class="chat-empty-sub">${esc(label)}</div>
+  </div>`;
 }
 
 async function renderChat(app, cid) {
@@ -2682,9 +3425,13 @@ async function renderChat(app, cid) {
   currentChatId = cid;
   // fetch chat list and get conversation details
   let conv = null;
+  let chats = [];
+  let archivedChats = [];
   try {
-    const chats = await api('/chats');
-    conv = chats.find(c => c.id === cid);
+    const both = await Promise.all([api('/chats'), api('/chats?archived=1')]);
+    chats = both[0] || [];
+    archivedChats = both[1] || [];
+    conv = [...chats, ...archivedChats].find(c => c.id === cid);
   } catch {}
   // fetch messages with pagination support
   let msgs = [], myAccepted = true;
@@ -2731,16 +3478,53 @@ async function renderChat(app, cid) {
   }
 
   const unreadCount = conv?.unread || 0;
-  const msgsHtml = buildChatMessagesHtml(msgs, unreadCount, conv);
+  const virtualRender = getVirtualChatRender(msgs, unreadCount, conv);
+  const msgsHtml = virtualRender.html;
+  const acceptedChats = sortChatsForSidebar(chats.filter(c => c.my_accepted !== false));
+  const acceptedArchivedChats = sortChatsForSidebar(archivedChats.filter(c => c.my_accepted !== false));
+  const pendingChats = chats.filter(c => c.my_accepted === false);
+  const renderSidebarRows = () => {
+    const source = chatSidebarFilters.archived ? acceptedArchivedChats : acceptedChats;
+    const filtered = source.filter(c => {
+      if (chatSidebarFilters.unread && !(c.unread > 0)) return false;
+      if (chatSidebarFilters.muted && !chatIsMuted(c)) return false;
+      if (chatSidebarFilters.pinned && !chatIsPinned(c)) return false;
+      return true;
+    });
+    return `
+      ${!chatSidebarFilters.archived && pendingChats.length ? `<div class="dm-section-title">ЗАПРОСЫ (${pendingChats.length})</div>${pendingChats.map(c => chatRow(c, cid)).join('')}` : ''}
+      ${filtered.length ? filtered.map(c => chatRow(c, cid)).join('') : '<div class="empty">Нет диалогов</div>'}
+    `;
+  };
 
   lastMsgTime = msgs.length ? msgs[msgs.length-1].created_at : '';
   document.body.classList.add('in-chat');
   // render chat view
   app.innerHTML = `
-  <div class="chat-view">
+  <div class="chat-layout">
+    <aside class="chat-sidebar">
+      <div class="chat-sidebar-head">
+        <div class="chat-sidebar-title">ЧАТЫ</div>
+        <button class="btn btn-sm btn-ic-pad" data-post-action="open-new-group-chat" title="Новая группа">${iconCut('add', 'ui-icon', 15, 15)} ГРУППА</button>
+      </div>
+      <div class="chat-sidebar-filters">
+        <button type="button" id="chatFilterAll" class="chat-filter-btn${!chatSidebarFilters.unread && !chatSidebarFilters.muted && !chatSidebarFilters.pinned && !chatSidebarFilters.archived ? ' active' : ''}">ВСЕ</button>
+        <button type="button" id="chatFilterUnread" class="chat-filter-btn chat-filter-btn--ic${chatSidebarFilters.unread ? ' active' : ''}">${iconCut('comment', 'ui-icon', 12, 12)}НЕПРОЧИТ.</button>
+        <button type="button" id="chatFilterMuted" class="chat-filter-btn${chatSidebarFilters.muted ? ' active' : ''}">${iconCut('mute', 'ui-icon', 13, 13)}</button>
+        <button type="button" id="chatFilterPinned" class="chat-filter-btn${chatSidebarFilters.pinned ? ' active' : ''}">${iconCut('pin', 'ui-icon', 13, 13)}</button>
+        <button type="button" id="chatFilterArchived" class="chat-filter-btn${chatSidebarFilters.archived ? ' active' : ''}">${iconCut('disk', 'ui-icon', 13, 13)}</button>
+      </div>
+      <div class="chat-sidebar-search-wrap">
+        <span class="chat-sidebar-search-ic" aria-hidden="true">${iconCut('search', 'ui-icon', 14, 14)}</span>
+        <input class="chat-sidebar-search" id="chatSidebarSearch" placeholder="Поиск чатов..." autocomplete="off">
+      </div>
+      <div class="chat-sidebar-list" id="chatSidebarList">${renderSidebarRows()}</div>
+    </aside>
+    <div class="chat-view">
+    <div id="realtimeStatusBar" class="realtime-status-bar${realtimeDisconnected ? '' : ' hidden'}"></div>
     <div class="chat-head">
-      <button type="button" class="chat-back" onclick="go('chats')" aria-label="Назад к чатам">←</button>
-      <div class="chat-head-main${!conv?.is_group && dmOther ? ' chat-head-main--click' : ''}" ${!conv?.is_group && dmOther ? `onclick="openUserInfoPanel('${esc(dmOther.username)}')"` : ''}>
+      <button type="button" class="chat-back" data-post-action="go-chats" aria-label="Назад к чатам">${iconCut('back', 'ui-icon', 20, 20)}</button>
+      <div class="chat-head-main${!conv?.is_group && dmOther ? ' chat-head-main--click' : ''}" ${!conv?.is_group && dmOther ? `data-post-action="open-user-info-panel" data-username="${esc(dmOther.username)}"` : ''}>
         <div class="chat-head-avatar">${headAvatarHtml}</div>
         <div class="chat-head-titles">
           <div class="chat-title">${esc(title)}</div>
@@ -2748,45 +3532,55 @@ async function renderChat(app, cid) {
         </div>
       </div>
       <div class="chat-head-tools">
-        ${conv && conv.is_group ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="leaveGroupChat('${conv.id}')" title="Покинуть группу">🚪</button>` : ''}
-        ${conv && conv.is_group ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="toggleGroupMembers()" title="Участники">👥</button>` : ''}
-        ${conv && conv.is_group && conv.owner === me?.id ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="editGroupInfo('${conv.id}')" title="Группа">✎</button>` : ''}
-        <button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="openMediaGallery('${cid}')" title="Медиа">📷</button>
-        <button type="button" class="chat-tool-btn chat-tool-btn--icon" id="chatSearchBtn" onclick="toggleChatSearch('${cid}')" title="Поиск">⌕</button>
-        <button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="toggleChatMute('${cid}')" title="Уведомления" id="chatMuteBtn">${isMuted ? '🔕' : '🔔'}</button>
-        <button type="button" class="chat-tool-btn chat-tool-btn--icon chat-tool-btn--export" title="Экспорт TXT" onclick="exportChat('${cid}')">↓</button>
+        ${conv && conv.is_group ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" data-post-action="leave-group-chat" data-conv-id="${conv.id}" title="Покинуть группу">${iconCut('remove', 'ui-icon', 18, 18)}</button>` : ''}
+        ${conv && conv.is_group ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" data-post-action="toggle-group-members" title="Участники">${iconCut('more-horizontal', 'ui-icon', 18, 18)}</button>` : ''}
+        ${conv && conv.is_group && conv.owner === me?.id ? `<button type="button" class="chat-tool-btn chat-tool-btn--icon" data-post-action="edit-group-info" data-conv-id="${conv.id}" title="Группа">${iconCut('edit', 'ui-icon', 18, 18)}</button>` : ''}
+        <button type="button" class="chat-tool-btn chat-tool-btn--icon" data-post-action="open-media-gallery" data-conv-id="${cid}" title="Медиа">${iconCut('media', 'ui-icon', 18, 18)}</button>
+        <button type="button" class="chat-tool-btn chat-tool-btn--icon" id="chatSearchBtn" data-post-action="toggle-chat-search" data-conv-id="${cid}" title="Поиск">${iconCut('search', 'ui-icon', 18, 18)}</button>
+        <button type="button" class="chat-tool-btn chat-tool-btn--icon" data-post-action="toggle-chat-mute" data-conv-id="${cid}" title="Уведомления" id="chatMuteBtn">${isMuted ? iconCut('mute', 'ui-icon', 18, 18) : iconCut('notifications', 'ui-icon', 18, 18)}</button>
+        <div class="chat-tools-more">
+          <button type="button" class="chat-tool-btn chat-tool-btn--icon" data-post-action="toggle-chat-tools-menu" title="Еще">${iconCut('more-horizontal', 'ui-icon', 18, 18)}</button>
+          <div class="chat-tools-menu hidden">
+            <button type="button" data-post-action="toggle-chat-pin" data-conv-id="${cid}">${iconCut(conv?.pinned_at ? 'unpin' : 'pin', 'ui-icon', 15, 15)}<span>${conv?.pinned_at ? 'Открепить чат' : 'Закрепить чат'}</span></button>
+            <button type="button" data-post-action="toggle-chat-archive" data-conv-id="${cid}" data-archived="${conv?.archived_at ? '1' : '0'}">${iconCut('disk', 'ui-icon', 15, 15)}<span>${conv?.archived_at ? 'Вернуть из архива' : 'В архив'}</span></button>
+            <button type="button" data-post-action="open-saved-messages" data-conv-id="${cid}">${iconCut('bookmark', 'ui-icon', 15, 15)}<span>Сохраненные</span></button>
+            <button type="button" data-post-action="export-chat" data-conv-id="${cid}">${iconCut('download', 'ui-icon', 15, 15)}<span>Скачать TXT</span></button>
+          </div>
+        </div>
       </div>
     </div>
-    ${chatPinnedMsg ? `<div class="pinned-msg-bar" id="pinnedBar" onclick="scrollToPinned('${chatPinnedMsg.id}')">
-      📌 <span>${esc((chatPinnedMsg.content || (chatPinnedMsg.file_type ? '📎' : '')).slice(0,60))}</span>
-      ${conv && (conv.is_group ? conv.owner === (me?.id) : true) ? `<button type="button" class="pinned-msg-unpin" onclick="event.stopPropagation();unpinMessage('${cid}')" aria-label="Открепить">✕</button>` : ''}
+    ${chatPinnedMsg ? `<div class="pinned-msg-bar" id="pinnedBar" data-post-action="scroll-to-pinned" data-msg-id="${chatPinnedMsg.id}">
+      <span class="pinned-bar-pin-ic">${iconCut('pin', 'ui-icon', 14, 14)}</span>
+      <span>${esc((chatPinnedMsg.content || (chatPinnedMsg.file_type ? '[file]' : '')).slice(0,60))}</span>
+      ${conv && (conv.is_group ? conv.owner === (me?.id) : true) ? `<button type="button" class="pinned-msg-unpin" data-post-action="unpin-message" data-conv-id="${cid}" aria-label="Открепить">${iconCut('unpin', 'ui-icon', 16, 16)}</button>` : ''}
     </div>` : ''}
     <div id="chatSearchPanel" class="chat-search-panel hidden">
-      <input id="chatSearchInput" class="chat-search-input" placeholder="Поиск в переписке..." oninput="debouncedChatSearch('${cid}')">
+      <input id="chatSearchInput" class="chat-search-input" placeholder="Поиск в переписке..." data-post-action="chat-search-input" data-conv-id="${cid}">
       <div id="chatSearchResults" class="chat-search-results"></div>
     </div>
     ${conv && conv.is_group ? `<div id="groupMembersPanel" class="chat-search-panel hidden">
       ${(conv.members||[]).map(m => `<div class="group-member-row" style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.6rem">
         ${avatarEl(m.avatar,'avatar avatar-sm',initial(m.display_name))}
-        <span onclick="go('profile','${esc(m.username)}')" style="cursor:pointer;flex:1">${esc(m.display_name)}${m.id===conv.owner?' 👑':''}</span>
-        ${conv.owner===me?.id && m.id!==me?.id ? `<button class="btn btn-sm btn-ghost" style="padding:0.1rem 0.4rem" onclick="removeGroupMember('${conv.id}','${m.id}','${esc(m.username)}')">✕</button>` : ''}
+        <span data-post-action="go-profile" data-username="${esc(m.username)}" style="cursor:pointer;flex:1">${esc(m.display_name)}${m.id===conv.owner?' 👑':''}</span>
+        ${conv.owner===me?.id && m.id!==me?.id ? `<button class="btn btn-sm btn-ghost" style="padding:0.1rem 0.4rem" data-post-action="remove-group-member" data-conv-id="${conv.id}" data-member-id="${m.id}" data-username="${esc(m.username)}" aria-label="Удалить">${iconCut('trash', 'ui-icon', 15, 15)}</button>` : ''}
       </div>`).join('')}
-      ${conv.owner===me?.id ? `<div style="padding:0.35rem 0.6rem"><button class="btn btn-sm" onclick="addGroupMember('${conv.id}')" style="width:100%">+ Добавить участника</button></div>` : ''}
+      ${conv.owner===me?.id ? `<div style="padding:0.35rem 0.6rem"><button class="btn btn-sm btn-ic-row" data-post-action="add-group-member" data-conv-id="${conv.id}" style="width:100%">${iconCut('add', 'ui-icon', 14, 14)}Добавить участника</button></div>` : ''}
     </div>` : ''}
-    <div id="chatMsgs" class="chat-msgs">
-      ${msgsHtml}
+        <button id="chatVirtualMoreBtn" class="chat-virtual-more${virtualRender.hiddenCount ? '' : ' hidden'}" type="button">Показать старые (${virtualRender.hiddenCount})</button>
+        <div id="chatMsgs" class="chat-msgs">
+      ${msgs.length ? msgsHtml : chatEmptyStateHtml(title, conv)}
     </div>
-    <button id="scrollDownBtn" class="scroll-down-btn hidden" onclick="scrollChatToBottom()">↓</button>
+    <button id="scrollDownBtn" class="scroll-down-btn hidden" data-post-action="scroll-chat-bottom" aria-label="Вниз">${iconCut('back', 'ui-icon ui-icon--scroll-rot', 18, 18)}</button>
     <div class="composer chat-composer">
       ${myAccepted ? `
       <div id="composerNormal" class="composer-messenger">
         <div class="composer-messenger-row">
-          <button type="button" class="chat-tool-btn chat-tool-btn--icon" id="voiceBtn" title="Голосовое">◉</button>
+          <button type="button" class="chat-tool-btn chat-tool-btn--icon" id="voiceBtn" title="Голосовое">${iconCut('mic', 'ui-icon', 18, 18)}</button>
           <div class="chat-attach-wrap" id="chatAttachWrap">
-            <button type="button" class="chat-tool-btn chat-tool-btn--icon" onclick="toggleChatAttach()" title="Прикрепить">⊕</button>
+            <button type="button" class="chat-tool-btn chat-tool-btn--icon" data-post-action="toggle-chat-attach" title="Прикрепить">${iconCut('attach', 'ui-icon', 18, 18)}</button>
             <div class="chat-attach-menu hidden" id="chatAttachMenu">
-              <label class="attach-opt" for="msgImgFile" onclick="closeChatAttach()">↑ фото / видео</label>
-              <label class="attach-opt" for="msgFile" onclick="closeChatAttach()">◫ файл</label>
+              <label class="attach-opt" for="msgImgFile" data-post-action="close-chat-attach">UP фото / видео</label>
+              <label class="attach-opt" for="msgFile" data-post-action="close-chat-attach">FILE файл</label>
             </div>
           </div>
           <input type="file" id="msgImgFile" accept="image/*,video/*,.heic,.heif" class="hidden">
@@ -2794,33 +3588,39 @@ async function renderChat(app, cid) {
           <div class="composer-messenger-input-wrap">
             <textarea id="msgText" placeholder="Сообщение..." rows="1" autocomplete="off"></textarea>
           </div>
-          <button class="chat-send-btn" id="msgSendBtn" type="button" title="Отправить" aria-label="Отправить">➤</button>
+          <button class="chat-send-btn" id="msgSendBtn" type="button" title="Отправить" aria-label="Отправить">${iconCut('send', 'ui-icon', 20, 20)}</button>
         </div>
-        <div class="composer-messenger-meta"><span class="chat-attach-name" id="msgFileName"></span></div>
+        <div class="composer-messenger-meta"><span class="chat-attach-name" id="msgFileName"></span><button type="button" class="chat-attach-clear hidden" id="msgFileClear" data-post-action="clear-chat-attachment" aria-label="Убрать файл">${iconCut('close', 'ui-icon', 13, 13)}</button></div>
       </div>
       <div id="voiceRecBar" class="voice-rec-bar hidden">
-        <button class="chat-tool-btn vr-cancel-btn" onclick="cancelRecording()" title="Отмена">✕</button>
-        <span class="vr-rec-dot"></span>
-        <canvas id="voiceWaveCanvas" width="120" height="28" style="border-radius:4px;background:var(--bg2,#0a0a0a)"></canvas>
-        <span id="voiceTimer" class="vr-timer">0:00</span>
-        <button class="btn btn-sm" onclick="stopRecordingPreview()">⏹ СТОП</button>
+        <button class="voice-circle-btn voice-circle-btn--ghost" data-post-action="cancel-recording" title="Отмена">${iconCut('close', 'ui-icon', 17, 17)}</button>
+        <div class="voice-rec-main">
+          <div class="voice-rec-top"><span class="vr-rec-dot"></span><span class="voice-rec-label">Запись голоса</span><span id="voiceTimer" class="vr-timer">00:00</span></div>
+          <canvas id="voiceWaveCanvas" class="voice-rec-wave" width="220" height="32"></canvas>
+        </div>
+        <button class="voice-circle-btn voice-circle-btn--stop" data-post-action="stop-recording-preview" title="Прослушать">${iconCut('pause', 'ui-icon', 18, 18)}</button>
       </div>
       <div id="voicePreviewBar" class="voice-preview-bar hidden">
-        <button class="chat-tool-btn vr-cancel-btn" onclick="cancelVoicePreview()" title="Отмена">✕</button>
-        <button class="vp-play" id="vpPreviewPlay" onclick="vpPreviewToggle()">▶</button>
-        <span class="vp-time" id="vpPreviewTime">0:00</span>
-        <button class="btn btn-sm vp-send-btn" onclick="sendVoicePreview()">✓ ОТПРАВИТЬ</button>
+        <button class="voice-circle-btn voice-circle-btn--ghost" data-post-action="cancel-voice-preview" title="Удалить">${iconCut('trash', 'ui-icon', 16, 16)}</button>
+        <button class="voice-circle-btn" id="vpPreviewPlay" data-post-action="vp-preview-toggle" aria-label="Воспроизвести">${playPauseIconHtml(false, 16, 16)}</button>
+        <div class="voice-preview-main">
+          <div class="voice-preview-top"><span class="voice-preview-title">Прослушать перед отправкой</span><span class="vp-time" id="vpPreviewTime">0:00</span></div>
+          <div class="voice-preview-wave" id="voicePreviewWave" role="slider" aria-label="Позиция голосового сообщения">${vpBars('preview')}</div>
+        </div>
+        <button class="voice-mini-btn" data-post-action="restart-voice-recording">заново</button>
+        <button class="voice-circle-btn voice-circle-btn--send vp-send-btn" data-post-action="send-voice-preview" title="Отправить">${iconCut('send', 'ui-icon', 18, 18)}</button>
         <audio id="voicePreviewAudio" style="display:none"></audio>
       </div>
       ` : `
       <div class="dm-request-banner">
         <span>Запрос на переписку</span>
         <div class="dm-request-btns">
-          <button class="btn btn-sm" onclick="acceptDmRequest('${cid}')">ПРИНЯТЬ</button>
-          <button class="btn btn-sm btn-danger" onclick="declineDmRequest('${cid}')">УДАЛИТЬ</button>
+          <button class="btn btn-sm btn-ic-row" data-post-action="accept-dm-request" data-conv-id="${cid}">${iconCut('check', 'ui-icon', 14, 14)}ПРИНЯТЬ</button>
+          <button class="btn btn-sm btn-danger btn-ic-row" data-post-action="decline-dm-request" data-conv-id="${cid}">${iconCut('close', 'ui-icon', 14, 14)}УДАЛИТЬ</button>
         </div>
       </div>
       `}
+    </div>
     </div>
   </div>
   `;
@@ -2829,6 +3629,98 @@ async function renderChat(app, cid) {
   initVoiceBtn(cid);
   if (msgPoll) { clearInterval(msgPoll); msgPoll = null; }
   loadLinkPreviews(document.getElementById('chatMsgs') || document.getElementById('app')).catch(() => {});
+  flushPendingChatQueue().catch(() => {});
+  document.getElementById('chatVirtualMoreBtn')?.addEventListener('click', () => {
+    window._chatVisibleFrom = Math.max(0, (window._chatVisibleFrom || 0) - CHAT_VIRTUAL_CHUNK);
+    rerenderVirtualMessages(conv);
+    loadLinkPreviews(document.getElementById('chatMsgs')).catch(() => {});
+  });
+  const sideList = document.getElementById('chatSidebarList');
+  const syncFilterButtons = () => {
+    document.getElementById('chatFilterAll')?.classList.toggle('active', !chatSidebarFilters.unread && !chatSidebarFilters.muted && !chatSidebarFilters.pinned && !chatSidebarFilters.archived);
+    document.getElementById('chatFilterUnread')?.classList.toggle('active', chatSidebarFilters.unread);
+    document.getElementById('chatFilterMuted')?.classList.toggle('active', chatSidebarFilters.muted);
+    document.getElementById('chatFilterPinned')?.classList.toggle('active', chatSidebarFilters.pinned);
+    document.getElementById('chatFilterArchived')?.classList.toggle('active', chatSidebarFilters.archived);
+  };
+  const renderSidebarList = () => {
+    if (!sideList) return;
+    sideList.innerHTML = renderSidebarRows();
+    syncFilterButtons();
+  };
+  document.getElementById('chatFilterAll')?.addEventListener('click', () => {
+    chatSidebarFilters = { unread: false, muted: false, pinned: false, archived: false };
+    renderSidebarList();
+  });
+  document.getElementById('chatFilterUnread')?.addEventListener('click', () => {
+    chatSidebarFilters.unread = !chatSidebarFilters.unread;
+    renderSidebarList();
+  });
+  document.getElementById('chatFilterMuted')?.addEventListener('click', () => {
+    chatSidebarFilters.muted = !chatSidebarFilters.muted;
+    renderSidebarList();
+  });
+  document.getElementById('chatFilterPinned')?.addEventListener('click', () => {
+    chatSidebarFilters.pinned = !chatSidebarFilters.pinned;
+    renderSidebarList();
+  });
+  document.getElementById('chatFilterArchived')?.addEventListener('click', () => {
+    chatSidebarFilters.archived = !chatSidebarFilters.archived;
+    renderSidebarList();
+  });
+  const sideSearch = document.getElementById('chatSidebarSearch');
+  if (sideSearch) {
+    let activeSearchRow = -1;
+    const getVisibleRows = () => Array.from(document.querySelectorAll('.chat-sidebar .chat-row')).filter(r => r.style.display !== 'none');
+    const updateSearchRowActive = (idx) => {
+      const rows = getVisibleRows();
+      rows.forEach((r, i) => r.classList.toggle('chat-row-search-active', i === idx));
+    };
+    sideSearch.addEventListener('input', () => {
+      const q = sideSearch.value.trim().toLowerCase();
+      const rows = Array.from(document.querySelectorAll('.chat-sidebar .chat-row'));
+      rows.forEach(row => {
+        const name = row.querySelector('.chat-name')?.textContent?.toLowerCase() || '';
+        const last = row.querySelector('.chat-last')?.textContent?.toLowerCase() || '';
+        row.style.display = !q || name.includes(q) || last.includes(q) ? '' : 'none';
+      });
+      document.querySelectorAll('.chat-sidebar .dm-section-title').forEach(title => {
+        const nextRows = [];
+        let n = title.nextElementSibling;
+        while (n && !n.classList.contains('dm-section-title')) {
+          if (n.classList.contains('chat-row')) nextRows.push(n);
+          n = n.nextElementSibling;
+        }
+        title.style.display = nextRows.some(r => r.style.display !== 'none') ? '' : 'none';
+      });
+      activeSearchRow = -1;
+      updateSearchRowActive(activeSearchRow);
+    });
+    sideSearch.addEventListener('keydown', e => {
+      const rows = getVisibleRows();
+      if (!rows.length) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeSearchRow = Math.min(rows.length - 1, activeSearchRow + 1);
+        updateSearchRowActive(activeSearchRow);
+        rows[activeSearchRow]?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeSearchRow = Math.max(0, activeSearchRow - 1);
+        updateSearchRowActive(activeSearchRow);
+        rows[activeSearchRow]?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (activeSearchRow >= 0 && rows[activeSearchRow]) {
+          e.preventDefault();
+          rows[activeSearchRow].click();
+        }
+      }
+    });
+  }
 
   const txtEl = document.getElementById('msgText');
   if (txtEl) {
@@ -2848,6 +3740,7 @@ async function renderChat(app, cid) {
           api('/chats/' + cid + '/typing', { method: 'POST' }).catch(() => {});
         }
         localStorage.setItem(`draft_${cid}`, freshTxtEl.value);
+        updateChatSendReady();
       });
       freshTxtEl.addEventListener('keydown', e => {
         // Enter → send (without Shift/Ctrl/Alt)
@@ -2877,6 +3770,7 @@ async function renderChat(app, cid) {
       // Restore draft
       const draft = localStorage.getItem(`draft_${cid}`);
       if (draft) { freshTxtEl.value = draft; freshTxtEl.dispatchEvent(new Event('input')); }
+      updateChatSendReady();
       // @mention autocomplete for group chats
       if (conv?.is_group) {
         const memberSuggestions = (conv.members || []).filter(m => m.id !== me?.id);
@@ -2897,7 +3791,7 @@ async function renderChat(app, cid) {
     setTimeout(() => {
       const btn = document.getElementById('scrollDownBtn');
       if (btn) {
-        btn.innerHTML = `↓ ${unreadCount}`;
+        btn.innerHTML = `${iconCut('back', 'ui-icon ui-icon--scroll-rot', 18, 18)}<span class="scroll-down-badge">${unreadCount}</span>`;
         btn.classList.remove('hidden');
       }
     }, 100);
@@ -2921,9 +3815,12 @@ async function renderChat(app, cid) {
       const atBottom = chatMsgsEl.scrollHeight - chatMsgsEl.scrollTop - chatMsgsEl.clientHeight < 80;
       if (atBottom) {
         const btn = document.getElementById('scrollDownBtn');
-        if (btn) { btn.innerHTML = '↓'; btn.classList.add('hidden'); }
+        if (btn) { btn.innerHTML = iconCut('back', 'ui-icon ui-icon--scroll-rot', 18, 18); btn.classList.add('hidden'); }
       } else {
         document.getElementById('scrollDownBtn')?.classList.remove('hidden');
+      }
+      if (chatMsgsEl.scrollTop < 80 && window._chatVisibleFrom > 0) {
+        return;
       }
       if (chatMsgsEl.scrollTop < 80 && window._chatHasMore && !window._chatLoadingMore && currentChatId) {
         window._chatLoadingMore = true;
@@ -2931,6 +3828,8 @@ async function renderChat(app, cid) {
           const r = await api(`/chats/${currentChatId}/messages?before=${encodeURIComponent(window._chatOldestTs)}`);
           const older = r.messages || [];
           if (older.length) {
+            window._chatAllMsgs = [...older, ...(window._chatAllMsgs || [])];
+            window._chatVisibleFrom = Math.max(0, (window._chatVisibleFrom || 0) + older.length);
             const prevH = chatMsgsEl.scrollHeight;
             const existingFirst = chatMsgsEl.querySelector('.msg[data-id]');
             const firstStub = existingFirst
@@ -3053,7 +3952,8 @@ function formatChatListTime(iso) {
 }
 
 function sameMsgCluster(prev, m) {
-  return prev && !prev.deleted_at && !m.deleted_at && sameId(prev.sender_id, m.sender_id);
+  if (!prev || !m) return false;
+  return !prev.deleted_at && !m.deleted_at && sameId(prev.sender_id, m.sender_id);
 }
 
 function buildMsgsSequential(msgs) {
@@ -3088,6 +3988,72 @@ function buildChatMessagesHtml(msgs, unreadCount, conv) {
   return inner;
 }
 
+function getVirtualChatRender(msgs, unreadCount, conv) {
+  window._chatAllMsgs = Array.isArray(msgs) ? msgs.slice() : [];
+  window._chatVisibleFrom = Math.max(0, window._chatAllMsgs.length - CHAT_VIRTUAL_WINDOW);
+  const visibleMsgs = window._chatAllMsgs.slice(window._chatVisibleFrom);
+  const hiddenCount = window._chatVisibleFrom;
+  const effectiveUnread = Math.min(unreadCount || 0, visibleMsgs.length);
+  return {
+    html: buildChatMessagesHtml(visibleMsgs, effectiveUnread, conv),
+    hiddenCount,
+    visibleMsgs
+  };
+}
+
+function rerenderVirtualMessages(conv) {
+  const chatMsgsEl = document.getElementById('chatMsgs');
+  const virtualBtn = document.getElementById('chatVirtualMoreBtn');
+  if (!chatMsgsEl || !Array.isArray(window._chatAllMsgs)) return;
+  const allMsgs = window._chatAllMsgs;
+  const from = Math.max(0, window._chatVisibleFrom || 0);
+  const prevFirstId = chatMsgsEl.querySelector('.msg[data-id]')?.dataset?.id || null;
+  const prevTop = chatMsgsEl.scrollTop;
+  const visible = allMsgs.slice(from);
+  chatMsgsEl.innerHTML = buildChatMessagesHtml(visible, 0, conv || window._chatRenderConv || window._currentChatConv);
+  if (virtualBtn) {
+    if (from > 0) {
+      virtualBtn.classList.remove('hidden');
+      virtualBtn.textContent = `Показать старые (${from})`;
+    } else {
+      virtualBtn.classList.add('hidden');
+    }
+  }
+  if (prevFirstId) {
+    const newFirst = chatMsgsEl.querySelector(`.msg[data-id="${prevFirstId}"]`);
+    if (newFirst) {
+      newFirst.scrollIntoView({ block: 'start' });
+      return;
+    }
+  }
+  chatMsgsEl.scrollTop = prevTop;
+}
+
+function chatFileKind(m) {
+  const type = String(m.file_type || '');
+  if (type.startsWith('image/')) return 'image';
+  if (type.startsWith('video/')) return 'video';
+  if (type.startsWith('audio/')) return 'audio';
+  if (type.includes('pdf')) return 'pdf';
+  if (type.includes('zip') || type.includes('archive')) return 'archive';
+  return 'file';
+}
+
+function chatAttachmentCardHtml(m) {
+  const label = m.file_name || (m.file_type ? m.file_type.split('/')[1] : 'file');
+  const size = Number(m.file_size || 0);
+  const meta = [m.file_type || 'file', size ? fmtBytes(size) : ''].filter(Boolean).join(' · ');
+  const kind = chatFileKind(m);
+  return `<div class="msg-file-card msg-file-card--${kind}">
+    <div class="msg-file-ic">${iconCut('file', 'ui-icon', 18, 18)}</div>
+    <div class="msg-file-main">
+      <a class="msg-file-name" href="${esc(m.file)}" target="_blank" download="${esc(label)}">${esc(label)}</a>
+      <div class="msg-file-meta">${esc(meta || 'attachment')}</div>
+    </div>
+    <a class="msg-file-download" href="${esc(m.file)}" download="${esc(label)}" title="Download">${iconCut('download', 'ui-icon', 16, 16)}</a>
+  </div>`;
+}
+
 function msgHtml(m, prev, next) {
   const mine = me && sameId(m.sender_id, me.id);
   const conv = window._chatRenderConv || window._currentChatConv;
@@ -3113,10 +4079,13 @@ function msgHtml(m, prev, next) {
     parts.push(`<div class="msg-sender-label">${esc(m.display_name || m.username || '')}</div>`);
   }
   if (m.forwarded_from) {
-    parts.push(`<div class="msg-forwarded">⏩ Пересланное</div>`);
+    parts.push(`<div class="msg-forwarded">${iconCut('forward', 'ui-icon msg-inline-ic', 11, 11)}<span class="msg-forwarded-text">Переслано${typeof m.forwarded_from === 'string' && m.forwarded_from.trim() ? ` · ${esc(m.forwarded_from.trim())}` : ''}</span></div>`);
+  }
+  if (m.saved) {
+    parts.push(`<div class="msg-saved-mark">${iconCut('bookmark-filled', 'ui-icon msg-inline-ic', 11, 11)}<span>Сохранено</span></div>`);
   }
   if (m.reply_to && m.reply_text) {
-    parts.push(`<div class="msg-reply-quote" onclick="jumpToMessage('${m.reply_to}','${currentChatId}')" style="cursor:pointer">↩ ${esc(m.reply_text.slice(0,80))}${m.reply_text.length>80?'…':''}</div>`);
+    parts.push(`<div class="msg-reply-quote" data-post-action="jump-to-message" data-msg-id="${m.reply_to}" data-conv-id="${currentChatId}">${iconCut('reply', 'ui-icon msg-inline-ic', 11, 11)} ${esc(m.reply_text.slice(0,80))}${m.reply_text.length>80?'…':''}</div>`);
   }
   if (m.content) parts.push(`<div class="msg-text">${formatMsg(m.content)}</div>`);
   if (m.content && !m.file) {
@@ -3127,15 +4096,13 @@ function msgHtml(m, prev, next) {
   }
   if (m.file) {
     if (m.file_type && m.file_type.startsWith('image/')) {
-      parts.push(`<div class="msg-img"><img src="${esc(m.file)}" loading="lazy" alt="" onclick="openImg('${esc(m.file)}')"></div>`);
+      parts.push(`<div class="msg-img" data-post-action="open-image" data-image="${esc(m.file)}"><img src="${esc(m.file)}" loading="lazy" alt=""></div>`);
     } else if (m.file_type && m.file_type.startsWith('audio/')) {
-      parts.push(voicePlayerHtml(m.file, m.id, m.file_name));
+      parts.push(voicePlayerHtml(m.file, m.id, m.file_name, true));
     } else if (m.file_type && m.file_type.startsWith('video/')) {
-      parts.push(`<video class="msg-video" controls src="${esc(m.file)}" preload="none" onclick="openVideo('${esc(m.file)}')"></video>`);
+      parts.push(`<video class="msg-video" controls src="${esc(m.file)}" preload="none" data-post-action="open-video" data-video="${esc(m.file)}"></video>`);
     } else {
-      const label = m.file_name || (m.file_type ? m.file_type.split('/')[1] : 'file');
-      const dlAttr = m.file_name ? ` download="${esc(m.file_name)}"` : '';
-      parts.push(`<div class="msg-file"><a href="${esc(m.file)}" target="_blank"${dlAttr}>${esc(label)}</a></div>`);
+      parts.push(chatAttachmentCardHtml(m));
     }
   }
   const timeTitle = timeAgo(m.created_at);
@@ -3143,21 +4110,18 @@ function msgHtml(m, prev, next) {
   if (m.edited_at) timeLabel += ' · изм.';
   if (mine) {
     const isRead = chatOtherLastRead && new Date(chatOtherLastRead) >= new Date(m.created_at);
-    parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}<span class="msg-tick${isRead ? ' read' : ''}">${isRead ? '✓✓' : '✓'}</span></div>`);
+    parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}<span class="msg-tick${isRead ? ' read' : ''}">${msgTickIcons(isRead)}</span></div>`);
   } else {
     parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}</div>`);
   }
   parts.push(`<div class="reaction-bar" data-mid="${m.id}">${reactionBarHtml(m.id, m.reactions || [])}</div>`);
+  const msgMenuText = (m.content || m.reply_text || m.file_name || '').slice(0, 500);
   const actions = `
     <div class="msg-actions">
-      <button onclick="startMsgReply('${m.id}','${(m.content||'').slice(0,80).replace(/'/g,"\\'")}',this)" title="Ответить">↩</button>
-      ${mine && !m.file ? `<button onclick="startEditMsg('${m.id}','${currentChatId}')" title="Редактировать">✎</button>` : ''}
-      ${mine ? `<button onclick="deleteMsg('${m.id}','${currentChatId}')" title="Удалить">✕</button>` : ''}
-      <button onclick="pinMessage('${m.id}','${currentChatId}')" title="Закрепить">📌</button>
-      <button onclick="forwardMsg('${m.id}','${currentChatId}')" title="Переслать">⏩</button>
+      <button class="msg-more-btn" data-post-action="open-msg-menu" data-msg-id="${m.id}" data-conv-id="${currentChatId}" data-mine="${mine ? '1' : '0'}" data-saved="${m.saved ? '1' : '0'}" data-has-file="${m.file ? '1' : '0'}" data-file-name="${esc(m.file_name || '')}" data-file-size="${esc(String(m.file_size || 0))}" data-msg-text="${esc(msgMenuText)}" title="Actions">${iconCut('more-horizontal', 'ui-icon', 15, 15)}</button>
     </div>`;
   return `
-    <div class="msg ${mine ? 'me' : ''} ${clusterClass}" data-id="${m.id}" data-sender="${m.sender_id ?? ''}" data-created="${m.created_at}" data-file="${m.file || ''}" data-file-type="${m.file_type || ''}">
+    <div class="msg ${mine ? 'me' : ''} ${clusterClass}" data-id="${m.id}" data-sender="${m.sender_id ?? ''}" data-created="${m.created_at}" data-saved="${m.saved ? '1' : '0'}" data-file="${m.file || ''}" data-file-type="${m.file_type || ''}" data-file-name="${esc(m.file_name || '')}" data-file-size="${esc(String(m.file_size || 0))}" data-msg-text="${esc(msgMenuText)}" data-author="${esc(m.display_name || m.username || '')}">
       ${mine ? '' : avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))}
       <div class="msg-body">
         ${parts.join('')}
@@ -3167,24 +4131,212 @@ function msgHtml(m, prev, next) {
   `;
 }
 
+function msgMenuRow(action, icon, label, attrs = '', danger = false) {
+  return `<button type="button" class="msg-menu-item${danger ? ' msg-menu-item--danger' : ''}" data-post-action="${action}" ${attrs}>${iconCut(icon, 'ui-icon', 15, 15)}<span>${label}</span></button>`;
+}
+
+function closeMsgMenuPopover() {
+  document.querySelectorAll('.msg-menu-popover').forEach(el => {
+    if (typeof el._cleanup === 'function') el._cleanup();
+    el.remove();
+  });
+}
+
+function openMsgMenu(btn) {
+  const mid = btn.dataset.msgId || '';
+  const cid = btn.dataset.convId || currentChatId || '';
+  if (!mid || !cid) return;
+  const openExisting = document.querySelector(`.msg-menu-popover[data-msg-id="${CSS.escape(mid)}"]`);
+  closeMsgMenuPopover();
+  if (openExisting) return;
+  const mine = btn.dataset.mine === '1';
+  const hasFile = btn.dataset.hasFile === '1';
+  const text = btn.dataset.msgText || '';
+  const canCopy = !!text;
+  const menu = document.createElement('div');
+  menu.className = 'msg-menu-popover';
+  menu.dataset.msgId = mid;
+  menu.innerHTML = `
+    <div class="msg-menu-list">
+      ${msgMenuRow('start-msg-reply', 'reply', 'Reply', `data-msg-id="${esc(mid)}" data-reply-text="${esc(text.slice(0,80))}"`)}
+      ${canCopy ? msgMenuRow('copy-msg-text', 'file', 'Copy text', `data-msg-id="${esc(mid)}"`) : ''}
+      ${mine && !hasFile ? msgMenuRow('start-edit-msg', 'edit', 'Edit', `data-msg-id="${esc(mid)}" data-conv-id="${esc(cid)}"`) : ''}
+      ${msgMenuRow('pin-message', 'pin', 'Pin', `data-msg-id="${esc(mid)}" data-conv-id="${esc(cid)}"`)}
+      ${msgMenuRow('toggle-save-msg', 'bookmark', btn.dataset.saved === '1' ? 'Unsave' : 'Save', `data-msg-id="${esc(mid)}" data-conv-id="${esc(cid)}" data-saved="${btn.dataset.saved === '1' ? '1' : '0'}"`)}
+      ${msgMenuRow('forward-msg', 'forward', 'Forward', `data-msg-id="${esc(mid)}" data-conv-id="${esc(cid)}"`)}
+      ${msgMenuRow('msg-details', 'settings', 'Details', `data-msg-id="${esc(mid)}"`)}
+      ${!mine ? msgMenuRow('report-msg', 'warning', 'Report', `data-msg-id="${esc(mid)}"`, true) : ''}
+      ${mine ? msgMenuRow('delete-msg', 'trash', 'Delete', `data-msg-id="${esc(mid)}" data-conv-id="${esc(cid)}"`, true) : ''}
+    </div>
+  `;
+  document.body.appendChild(menu);
+  const rect = btn.getBoundingClientRect();
+  const width = Math.min(224, window.innerWidth - 16);
+  const menuRect = menu.getBoundingClientRect();
+  const desiredLeft = mine ? rect.right - width : rect.left;
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, desiredLeft));
+  const aboveTop = rect.top - menuRect.height - 8;
+  const belowTop = rect.bottom + 8;
+  const top = aboveTop > 8 ? aboveTop : Math.min(window.innerHeight - menuRect.height - 8, belowTop);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${Math.max(8, top)}px`;
+  menu.style.width = `${width}px`;
+  const onDocClick = ev => {
+    if (menu.contains(ev.target) || btn.contains(ev.target)) return;
+    closeMsgMenuPopover();
+  };
+  const onKey = ev => {
+    if (ev.key === 'Escape') closeMsgMenuPopover();
+  };
+  const onScroll = () => closeMsgMenuPopover();
+  menu._cleanup = () => {
+    document.removeEventListener('click', onDocClick, true);
+    document.removeEventListener('keydown', onKey, true);
+    document.getElementById('chatMsgs')?.removeEventListener('scroll', onScroll);
+    window.removeEventListener('resize', onScroll);
+  };
+  setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
+  document.addEventListener('keydown', onKey, true);
+  document.getElementById('chatMsgs')?.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll, { passive: true });
+}
+
+async function copyMsgText(mid, modal) {
+  const msg = document.querySelector(`.msg[data-id="${CSS.escape(mid)}"]`);
+  const text = msg?.querySelector('.msg-text')?.innerText || msg?.dataset.msgText || '';
+  if (!text) { toast('Nothing to copy'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success('Copied');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    toast.success('Copied');
+  }
+  if (modal?.classList?.contains('msg-menu-popover')) closeMsgMenuPopover();
+  else modal?.remove();
+}
+
+function showMessageReport(mid, modal) {
+  const reasons = ['SPAM', 'ABUSE', 'COPYRIGHT', 'OTHER'];
+  if (!modal) return;
+  const isPopover = modal.classList.contains('msg-menu-popover');
+  if (!isPopover) {
+    modal.querySelector('.modal')?.classList.add('msg-menu-modal');
+    modal.querySelector('.modal')?.replaceChildren();
+  }
+  const box = isPopover ? modal : modal.querySelector('.modal');
+  if (!box) return;
+  box.innerHTML = `${isPopover ? '<div class="msg-menu-kicker">Report message</div>' : `<div class="modal-head"><b>Report message</b><button type="button" class="modal-icon-dismiss" data-post-action="close-modal-overlay" aria-label="Close">${iconCut('close', 'ui-icon', 18, 18)}</button></div>`}
+    <div class="msg-menu-list">
+      ${reasons.map(reason => msgMenuRow('do-report-message', 'warning', reason, `data-msg-id="${esc(mid)}" data-reason="${esc(reason)}"`, true)).join('')}
+    </div>`;
+}
+
+async function submitMessageReport(mid, reason, modal) {
+  await submitReport('message', mid, reason);
+  if (modal?.classList?.contains('msg-menu-popover')) closeMsgMenuPopover();
+  else modal?.remove();
+}
+
+function showMsgDetails(mid, modal) {
+  const msg = document.querySelector(`.msg[data-id="${CSS.escape(mid)}"]`);
+  if (!msg || !modal) return;
+  const created = msg.dataset.created ? `${formatChatMsgTime(msg.dataset.created)} · ${timeAgo(msg.dataset.created)}` : 'n/a';
+  const fileSize = Number(msg.dataset.fileSize || 0);
+  const rows = [
+    ['ID', mid],
+    ['Author', msg.dataset.author || (msg.classList.contains('me') ? 'You' : 'n/a')],
+    ['Time', created],
+    ['Type', msg.dataset.fileType || (msg.dataset.file ? 'file' : 'text')],
+    ['File', msg.dataset.fileName || ''],
+    ['Size', fileSize ? fmtBytes(fileSize) : ''],
+  ].filter(([, value]) => value);
+  const isPopover = modal.classList.contains('msg-menu-popover');
+  const box = isPopover ? modal : modal.querySelector('.modal');
+  if (!box) return;
+  box.innerHTML = `${isPopover ? '<div class="msg-menu-kicker">Details</div>' : `<div class="modal-head"><b>Details</b><button type="button" class="modal-icon-dismiss" data-post-action="close-modal-overlay" aria-label="Close">${iconCut('close', 'ui-icon', 18, 18)}</button></div>`}
+    <div class="msg-detail-list">${rows.map(([k,v]) => `<div class="msg-detail-row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
+}
+
 function updateTicks() {
   document.querySelectorAll('.msg.me[data-created]').forEach(msgEl => {
     const tickEl = msgEl.querySelector('.msg-tick');
     if (!tickEl) return;
     const isRead = chatOtherLastRead && new Date(chatOtherLastRead) >= new Date(msgEl.dataset.created);
     tickEl.className = `msg-tick${isRead ? ' read' : ''}`;
-    tickEl.textContent = isRead ? '✓✓' : '✓';
+    tickEl.innerHTML = msgTickIcons(isRead);
   });
 }
 
 function bindMsgFile() {
   const updateName = () => {
     const f = (document.getElementById('msgImgFile')?.files?.[0]) || (document.getElementById('msgFile')?.files?.[0]);
-    const labelEl = document.getElementById('msgFileName');
-    if (labelEl) labelEl.textContent = f ? f.name : '';
+    setChatAttachmentLabel(f);
+    updateChatSendReady();
   };
   document.getElementById('msgFile')?.addEventListener('change', updateName);
   document.getElementById('msgImgFile')?.addEventListener('change', updateName);
+  bindChatDropAttach();
+  updateChatSendReady();
+}
+
+function setChatAttachmentLabel(file) {
+  const labelEl = document.getElementById('msgFileName');
+  const clearBtn = document.getElementById('msgFileClear');
+  if (!labelEl) return;
+  if (!file) {
+    labelEl.textContent = '';
+    clearBtn?.classList.add('hidden');
+    return;
+  }
+  const size = file.size ? ` · ${fmtBytes(file.size)}` : '';
+  labelEl.innerHTML = `${iconCut(file.type?.startsWith('image/') || file.type?.startsWith('video/') ? 'media' : 'file', 'ui-icon chat-attach-ic', 13, 13)}<span>${esc(file.name)}${esc(size)}</span>`;
+  clearBtn?.classList.remove('hidden');
+}
+
+function clearChatAttachment() {
+  const fileEl = document.getElementById('msgFile');
+  const imgFileEl = document.getElementById('msgImgFile');
+  if (fileEl) fileEl.value = '';
+  if (imgFileEl) imgFileEl.value = '';
+  setChatAttachmentLabel(null);
+  updateChatSendReady();
+}
+
+function bindChatDropAttach() {
+  const composer = document.querySelector('.chat-composer');
+  if (!composer || composer.dataset.dropBound === '1') return;
+  composer.dataset.dropBound = '1';
+  const setFiles = files => {
+    const file = files?.[0];
+    if (!file) return;
+    const target = (file.type || '').startsWith('image/') || (file.type || '').startsWith('video/')
+      ? document.getElementById('msgImgFile')
+      : document.getElementById('msgFile');
+    if (!target) return;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    target.files = dt.files;
+    setChatAttachmentLabel(file);
+    updateChatSendReady();
+  };
+  composer.addEventListener('dragover', ev => {
+    ev.preventDefault();
+    composer.classList.add('chat-composer--drop');
+  });
+  composer.addEventListener('dragleave', ev => {
+    if (!composer.contains(ev.relatedTarget)) composer.classList.remove('chat-composer--drop');
+  });
+  composer.addEventListener('drop', ev => {
+    ev.preventDefault();
+    composer.classList.remove('chat-composer--drop');
+    setFiles(ev.dataTransfer?.files);
+  });
 }
 
 function toggleChatAttach() {
@@ -3218,7 +4370,7 @@ function startMsgReply(mid, text, btn) {
     const composer = document.querySelector('.chat-composer');
     if (composer) composer.insertAdjacentElement('beforebegin', bar);
   }
-  bar.innerHTML = `<span class="reply-bar-text">↩ ${esc(text.slice(0,60))}${text.length>60?'…':''}</span><button class="reply-bar-cancel" onclick="cancelMsgReply()">✕</button>`;
+  bar.innerHTML = `<span class="reply-bar-text"><span class="reply-bar-ic">${iconCut('reply', 'ui-icon', 13, 13)}</span> ${esc(text.slice(0,60))}${text.length>60?'…':''}</span><button class="reply-bar-cancel" data-post-action="cancel-msg-reply" aria-label="Отменить ответ">${iconCut('close', 'ui-icon', 16, 16)}</button>`;
   document.getElementById('msgText')?.focus();
 }
 function cancelMsgReply() {
@@ -3253,14 +4405,19 @@ async function sendMsg(cid) {
     sendBtn.disabled = true;
     sendBtn.style.opacity = '0.6';
   }
+  setComposerStatus(file ? 'Загрузка 0%' : 'Отправка...', 'pending');
   try {
-    await api('/chats/'+cid+'/messages', { method:'POST', body: fd });
+    if (file) {
+      await sendMessageWithProgress(cid, fd, p => setComposerStatus(`Загрузка ${p}%`, 'pending'));
+    } else {
+      await api('/chats/'+cid+'/messages', { method:'POST', body: fd });
+    }
     // Clear inputs
     if (txtEl) { txtEl.value = ''; txtEl.style.height = 'auto'; }
     if (fileEl) fileEl.value = '';
     if (imgFileEl) imgFileEl.value = '';
-    const nameEl = document.getElementById('msgFileName');
-    if (nameEl) nameEl.textContent = '';
+    updateChatSendReady();
+    setChatAttachmentLabel(null);
     // Clear draft
     localStorage.removeItem(`draft_${cid}`);
     // Optimistically fetch any new messages posted after the last timestamp.
@@ -3281,14 +4438,60 @@ async function sendMsg(cid) {
         }
       } catch {}
     }
+    setComposerStatus('Отправлено', 'ok');
+    setTimeout(() => {
+      const statusEl = document.getElementById('msgFileName');
+      if (statusEl && statusEl.textContent === 'Отправлено') setComposerStatus('', '');
+    }, 1200);
   } catch (e) {
-    toast.error(e.message);
+    const isOffline = !navigator.onLine || /network|failed|fetch|offline/i.test(String(e?.message || ''));
+    if (isOffline && content && !file) {
+      pendingChatQueue.push({ cid, content, created_at: new Date().toISOString() });
+      persistPendingChatQueue();
+      if (txtEl) { txtEl.value = ''; txtEl.style.height = 'auto'; }
+      updateChatSendReady();
+      localStorage.removeItem(`draft_${cid}`);
+      const nameEl = document.getElementById('msgFileName');
+      if (nameEl) nameEl.textContent = 'Сообщение поставлено в очередь (offline)';
+      toast('Нет сети: сообщение будет отправлено автоматически');
+      setComposerStatus(`В очереди: ${pendingChatQueue.length}`, 'pending');
+      updateRealtimeStatus(false);
+    } else {
+      toast.error(e.message);
+      setComposerStatus('Ошибка отправки', 'err');
+    }
   } finally {
     window._chatSending = false;
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.style.opacity = '';
     }
+    updateChatSendReady();
+  }
+}
+
+async function flushPendingChatQueue() {
+  if (!navigator.onLine || !pendingChatQueue.length) return;
+  setComposerStatus(`Отправка очереди (${pendingChatQueue.length})...`, 'pending');
+  const rest = [];
+  for (const item of pendingChatQueue) {
+    try {
+      await api(`/chats/${item.cid}/messages`, { method: 'POST', body: { content: item.content } });
+    } catch {
+      rest.push(item);
+    }
+  }
+  pendingChatQueue = rest;
+  persistPendingChatQueue();
+  updateRealtimeStatus(false);
+  if (!pendingChatQueue.length && page === 'chat' && currentChatId) {
+    setComposerStatus('Очередь отправлена', 'ok');
+    setTimeout(() => {
+      const statusEl = document.getElementById('msgFileName');
+      if (statusEl && /очеред/i.test(statusEl.textContent || '')) setComposerStatus('', '');
+    }, 1200);
+  } else if (pendingChatQueue.length) {
+    setComposerStatus(`В очереди: ${pendingChatQueue.length}`, 'pending');
   }
 }
 
@@ -3296,7 +4499,7 @@ function scrollChatToBottom() {
   const el = document.getElementById('chatMsgs');
   if (el) el.scrollTop = el.scrollHeight;
   const btn = document.getElementById('scrollDownBtn');
-  if (btn) { btn.classList.add('hidden'); btn.innerHTML = '↓'; }
+  if (btn) { btn.classList.add('hidden'); btn.innerHTML = iconCut('back', 'ui-icon ui-icon--scroll-rot', 18, 18); }
 }
 
 // ── CHAT SEARCH ──
@@ -3328,10 +4531,15 @@ async function runChatSearch(cid) {
   try {
     const msgs = await api(`/chats/${cid}/search?q=${encodeURIComponent(q)}`);
     if (!msgs.length) { resultsEl.innerHTML = '<div class="chat-search-empty">Ничего не найдено</div>'; return; }
+    const mark = (text = '') => {
+      const safe = esc(String(text));
+      const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
+      return safe.replace(re, '<mark>$1</mark>');
+    };
     resultsEl.innerHTML = msgs.map(m => `
-      <div class="chat-search-item" onclick="scrollToMsg('${m.id}')">
+      <div class="chat-search-item" data-post-action="scroll-to-msg" data-msg-id="${m.id}">
         <div class="chat-search-sender">${esc(m.display_name)}</div>
-        <div class="chat-search-text">${esc(m.content.slice(0,120))}</div>
+        <div class="chat-search-text">${mark((m.content || '').slice(0,120))}${!m.content && m.file_type ? `FILE ${esc(m.file_type)}` : ''}</div>
         <div class="chat-search-time">${timeAgo(m.created_at)}</div>
       </div>
     `).join('');
@@ -3405,14 +4613,47 @@ function showVoicePreview(cid, blob, mime) {
   bar.dataset.cid = cid;
   bar.dataset.mime = mime;
   const url = URL.createObjectURL(blob);
+  if (audio.dataset.objectUrl) URL.revokeObjectURL(audio.dataset.objectUrl);
+  audio.dataset.objectUrl = url;
   audio.src = url;
-  // Timer
   const timeEl = document.getElementById('vpPreviewTime');
   const playBtn = document.getElementById('vpPreviewPlay');
-  audio.ontimeupdate = () => { if (timeEl) timeEl.textContent = vpFmt(audio.currentTime); };
-  audio.onloadedmetadata = () => { if (timeEl && isFinite(audio.duration)) timeEl.textContent = vpFmt(audio.duration); };
-  audio.onended = () => { if (playBtn) playBtn.textContent = '▶'; if (timeEl) timeEl.textContent = vpFmt(audio.duration || 0); };
+  const wave = document.getElementById('voicePreviewWave');
+  if (wave) {
+    wave.innerHTML = vpBars(String(blob.size) + String(Date.now()));
+    wave.onclick = e => {
+      if (!audio.duration || !isFinite(audio.duration)) return;
+      const rect = wave.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      audio.currentTime = ratio * audio.duration;
+      updateVoicePreviewProgress(audio);
+    };
+  }
+  audio.ontimeupdate = () => updateVoicePreviewProgress(audio);
+  audio.onloadedmetadata = () => {
+    if (timeEl && isFinite(audio.duration)) timeEl.textContent = vpFmt(audio.duration);
+    updateVoicePreviewProgress(audio);
+  };
+  audio.onended = () => {
+    if (playBtn) playBtn.innerHTML = playPauseIconHtml(false, 16, 16);
+    if (timeEl) timeEl.textContent = vpFmt(audio.duration || 0);
+    updateVoicePreviewProgress(audio);
+  };
   bar.classList.remove('hidden');
+}
+
+function updateVoicePreviewProgress(audio) {
+  const timeEl = document.getElementById('vpPreviewTime');
+  const wave = document.getElementById('voicePreviewWave');
+  const pct = audio.duration && isFinite(audio.duration) ? audio.currentTime / audio.duration : 0;
+  if (timeEl) {
+    const current = audio.currentTime || 0;
+    const total = audio.duration && isFinite(audio.duration) ? audio.duration : 0;
+    timeEl.textContent = `${vpFmt(current)} / ${vpFmt(total)}`;
+  }
+  wave?.querySelectorAll('.vp-bar').forEach((bar, i, arr) => {
+    bar.classList.toggle('active', i / Math.max(arr.length - 1, 1) <= pct);
+  });
 }
 
 async function sendVoicePreview() {
@@ -3420,9 +4661,14 @@ async function sendVoicePreview() {
   const audio = document.getElementById('voicePreviewAudio');
   if (!bar || !vrPreviewBlob) return;
   const cid = bar.dataset.cid, mime = bar.dataset.mime;
-  if (audio) { audio.pause(); URL.revokeObjectURL(audio.src); audio.src = ''; }
+  if (audio) {
+    audio.pause();
+    if (audio.dataset.objectUrl) URL.revokeObjectURL(audio.dataset.objectUrl);
+    audio.dataset.objectUrl = '';
+    audio.src = '';
+  }
   const playBtn = document.getElementById('vpPreviewPlay');
-  if (playBtn) playBtn.textContent = '▶';
+  if (playBtn) playBtn.innerHTML = playPauseIconHtml(false, 16, 16);
   bar.classList.add('hidden');
   const blob = vrPreviewBlob;
   vrPreviewBlob = null;
@@ -3433,11 +4679,22 @@ function cancelVoicePreview() {
   const bar = document.getElementById('voicePreviewBar');
   const audio = document.getElementById('voicePreviewAudio');
   const playBtn = document.getElementById('vpPreviewPlay');
-  if (audio) { audio.pause(); URL.revokeObjectURL(audio.src); audio.src = ''; }
-  if (playBtn) playBtn.textContent = '▶';
+  if (audio) {
+    audio.pause();
+    if (audio.dataset.objectUrl) URL.revokeObjectURL(audio.dataset.objectUrl);
+    audio.dataset.objectUrl = '';
+    audio.src = '';
+  }
+  if (playBtn) playBtn.innerHTML = playPauseIconHtml(false, 16, 16);
   bar?.classList.add('hidden');
   vrPreviewBlob = null;
   document.getElementById('composerNormal')?.classList.remove('hidden');
+}
+
+function restartVoiceRecording() {
+  const cid = document.getElementById('voicePreviewBar')?.dataset.cid || currentChatId;
+  cancelVoicePreview();
+  if (cid) startRecording(cid);
 }
 
 async function startRecording(cid) {
@@ -3600,16 +4857,16 @@ async function sendVoiceMessage(cid, blob, mimeType) {
 // ── ADMIN ──
 // ── HUB ──
 const HUB_PLATFORMS = [
-  { id: 'youtube',    name: 'YouTube',    icon: '▶', handle: '@Walfirrr',   profile: 'https://www.youtube.com/@Walfirrr',        analytics: 'https://studio.youtube.com',                    group: 'SOCIALS',  keyHint: 'Google API key (Data API v3)' },
-  { id: 'instagram',  name: 'Instagram',  icon: '◉', handle: '@walfirrr',   profile: 'https://www.instagram.com/walfirrr/',      analytics: 'https://www.instagram.com/walfirrr/insights/',  group: 'SOCIALS',  keyHint: 'Meta Basic Display API token' },
+  { id: 'youtube',    name: 'YouTube',    icon: 'YT', handle: '@Walfirrr',   profile: 'https://www.youtube.com/@Walfirrr',        analytics: 'https://studio.youtube.com',                    group: 'SOCIALS',  keyHint: 'Google API key (Data API v3)' },
+  { id: 'instagram',  name: 'Instagram',  icon: 'IG', handle: '@walfirrr',   profile: 'https://www.instagram.com/walfirrr/',      analytics: 'https://www.instagram.com/walfirrr/insights/',  group: 'SOCIALS',  keyHint: 'Meta Basic Display API token' },
   { id: 'tiktok',     name: 'TikTok',     icon: '♪', handle: '@walfirrr',   profile: 'https://www.tiktok.com/@walfirrr',         analytics: 'https://www.tiktok.com/tiktokstudio/content',   group: 'SOCIALS',  keyHint: 'TikTok API client key' },
   { id: 'x',          name: 'X',          icon: '✕', handle: '@WalfirHere', profile: 'https://x.com/WalfirHere',                 analytics: 'https://analytics.twitter.com',                 group: 'SOCIALS',  keyHint: null },
   { id: 'vk',         name: 'VK',         icon: '❖', handle: 'walfir_off',  profile: 'https://vk.com/walfir_off',                analytics: 'https://vk.com/stats?group=walfir_off',         group: 'SOCIALS',  keyHint: 'Необязательно (публичный API)' },
-  { id: 'threads',    name: 'Threads',    icon: '⊕', handle: '@walfirrr',   profile: 'https://www.threads.com/@walfirrr',        analytics: null,                                            group: 'SOCIALS',  keyHint: null },
+  { id: 'threads',    name: 'Threads',    icon: 'TH', handle: '@walfirrr',   profile: 'https://www.threads.com/@walfirrr',        analytics: null,                                            group: 'SOCIALS',  keyHint: null },
   { id: 'soundcloud', name: 'SoundCloud', icon: '◐', handle: 'walfir',      profile: 'https://soundcloud.com/walfir',            analytics: 'https://soundcloud.com/dashboard',              group: 'MUSIC',    keyHint: null },
   { id: 'twitch',     name: 'Twitch',     icon: '◈', handle: 'walfirrr',    profile: 'https://www.twitch.tv/walfirrr',           analytics: 'https://dashboard.twitch.tv',                   group: 'STREAMS',  keyHint: 'client_id:client_secret' },
   { id: 'kick',       name: 'Kick',       icon: '◆', handle: 'walfir',      profile: 'https://kick.com/walfir',                  analytics: 'https://kick.com/dashboard',                    group: 'STREAMS',  keyHint: null },
-  { id: 'telegram',   name: 'Telegram',   icon: '➤', handle: 'walfirhere',  profile: 'https://t.me/walfirhere',                  analytics: null,                                            group: 'CHATS',    keyHint: null },
+  { id: 'telegram',   name: 'Telegram',   icon: 'TG', handle: 'walfirhere',  profile: 'https://t.me/walfirhere',                  analytics: null,                                            group: 'CHATS',    keyHint: null },
   { id: 'discord',    name: 'Discord',    icon: '⬡', handle: 'WALFIR',      profile: 'https://discord.gg/9HmN7cRzT3',           analytics: 'https://discord.com/developers/servers',        group: 'CHATS',    keyHint: null },
 ];
 
@@ -3629,11 +4886,11 @@ function fmtHubTs(ts) {
 
 async function renderHub(app) {
   if (!me || !me.is_admin) return go('feed');
-  app.innerHTML = '<div class="page-title">◈ HUB</div><div class="empty">· · ·</div>';
+  app.innerHTML = `<div class="page-title hub-page-title">${iconCut('settings', 'ui-icon hub-title-ic', 17, 17)}HUB</div><div class="empty">· · ·</div>`;
 
   let s, ext;
   try { [s, ext] = await Promise.all([api('/hub/stats'), api('/hub/external')]); }
-  catch (e) { app.innerHTML = `<div class="page-title">◈ HUB</div><div class="empty">${esc(e.message)}</div>`; return; }
+  catch (e) { app.innerHTML = `<div class="page-title hub-page-title">${iconCut('settings', 'ui-icon hub-title-ic', 17, 17)}HUB</div><div class="empty">${esc(e.message)}</div>`; return; }
 
   const groups = ['SOCIALS','MUSIC','STREAMS','CHATS'];
 
@@ -3656,21 +4913,21 @@ async function renderHub(app) {
 
   app.innerHTML = `
     <div class="page-title-row">
-      <span class="page-title">◈ HUB <span style="font-size:0.55rem;opacity:0.4;font-weight:400">METRICS</span></span>
-      <button class="btn btn-sm btn-ghost" onclick="refreshHubExternal()">↻ ОБНОВИТЬ</button>
+      <span class="page-title hub-page-title">${iconCut('settings', 'ui-icon hub-title-ic', 17, 17)}HUB <span style="font-size:0.55rem;opacity:0.4;font-weight:400">METRICS</span></span>
+      <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="refresh-hub-external">${iconCut('download', 'ui-icon', 12, 12)}SYNC ОБНОВИТЬ</button>
     </div>
 
     <div class="hub-w0pium">
       <div class="hub-section-title">W0PIUM</div>
       <div class="hub-stats-grid">
         ${[
-          { label: 'ПОСТОВ',        val: s.posts },
-          { label: 'ФОЛЛОВЕРОВ',   val: s.followers },
-          { label: 'ЛАЙКОВ',       val: s.likes },
-          { label: 'ПРОСЛУШИВАНИЙ',val: s.plays },
-          { label: 'ДРОПОВ',       val: s.drops },
-          { label: 'КОММЕНТАРИЕВ', val: s.comments },
-        ].map(x => `<div class="hub-stat"><div class="hub-stat-val">${x.val}</div><div class="hub-stat-lbl">${x.label}</div></div>`).join('')}
+          { label: 'ПОСТОВ',        val: s.posts, ic: 'home' },
+          { label: 'ФОЛЛОВЕРОВ',   val: s.followers, ic: 'profile' },
+          { label: 'ЛАЙКОВ',       val: s.likes, ic: 'like' },
+          { label: 'ПРОСЛУШИВАНИЙ',val: s.plays, ic: 'play' },
+          { label: 'ДРОПОВ',       val: s.drops, ic: 'media' },
+          { label: 'КОММЕНТАРИЕВ', val: s.comments, ic: 'comment' },
+        ].map(x => `<div class="hub-stat"><div class="hub-stat-val">${x.val}</div><div class="hub-stat-lbl">${iconCut(x.ic, 'ui-icon hub-stat-ic', 10, 10)}${x.label}</div></div>`).join('')}
       </div>
     </div>
 
@@ -3706,7 +4963,7 @@ async function renderHub(app) {
           <div class="hub-key-row">
             <div class="hub-key-name">${p.icon} ${p.name}</div>
             <input class="input hub-key-input" id="hkey-${p.id}" placeholder="${p.keyHint}" autocomplete="off" spellcheck="false">
-            <button class="hub-btn hub-btn-save" onclick="saveHubKey('${p.id}')">СОХРАНИТЬ</button>
+            <button class="hub-btn hub-btn-save" data-post-action="save-hub-key" data-platform-id="${p.id}">СОХРАНИТЬ</button>
           </div>
         `).join('')}
       </div>
@@ -3751,14 +5008,15 @@ async function renderAdmin(app) {
   if (!me || !me.is_admin) return go('feed');
   app.innerHTML = `
     <div class="admin-wrap">
-      <h2 class="admin-title">⚡ ПАНЕЛЬ УПРАВЛЕНИЯ</h2>
+      <h2 class="admin-title admin-title-row">${iconCut('settings', 'ui-icon admin-title-ic', 18, 18)}ПАНЕЛЬ УПРАВЛЕНИЯ</h2>
       <div class="admin-tabs">
-        <button class="admin-tab ${adminTab==='stats'?'active':''}" onclick="adminSwitch('stats')">СТАТИСТИКА</button>
-        <button class="admin-tab ${adminTab==='users'?'active':''}" onclick="adminSwitch('users')">ПОЛЬЗОВАТЕЛИ</button>
-        <button class="admin-tab ${adminTab==='drops'?'active':''}" onclick="adminSwitch('drops')">DROPS</button>
-        <button class="admin-tab ${adminTab==='invites'?'active':''}" onclick="adminSwitch('invites')">ИНВАЙТЫ</button>
-        <button class="admin-tab ${adminTab==='reports'?'active':''}" onclick="adminSwitch('reports')">ЖАЛОБЫ</button>
-        <button class="admin-tab ${adminTab==='verify'?'active':''}" onclick="adminSwitch('verify')">ВЕРИФИКАЦИИ</button>
+        <button class="admin-tab ${adminTab==='stats'?'active':''}" data-post-action="admin-switch-tab" data-tab="stats">${iconCut('home', 'ui-icon', 11, 11)}СТАТИСТИКА</button>
+        <button class="admin-tab ${adminTab==='users'?'active':''}" data-post-action="admin-switch-tab" data-tab="users">${iconCut('profile', 'ui-icon', 11, 11)}ПОЛЬЗОВАТЕЛИ</button>
+        <button class="admin-tab ${adminTab==='drops'?'active':''}" data-post-action="admin-switch-tab" data-tab="drops">${iconCut('media', 'ui-icon', 11, 11)}DROPS</button>
+        <button class="admin-tab ${adminTab==='invites'?'active':''}" data-post-action="admin-switch-tab" data-tab="invites">${iconCut('add', 'ui-icon', 11, 11)}ИНВАЙТЫ</button>
+        <button class="admin-tab ${adminTab==='reports'?'active':''}" data-post-action="admin-switch-tab" data-tab="reports">${iconCut('warning', 'ui-icon', 11, 11)}ЖАЛОБЫ</button>
+        <button class="admin-tab ${adminTab==='verify'?'active':''}" data-post-action="admin-switch-tab" data-tab="verify">${iconCut('check', 'ui-icon', 11, 11)}ВЕРИФИКАЦИИ</button>
+        <button class="admin-tab ${adminTab==='diag'?'active':''}" data-post-action="admin-switch-tab" data-tab="diag">${iconCut('more-horizontal', 'ui-icon', 11, 11)}DIAG</button>
       </div>
       <div id="adminContent" class="admin-content">
         <div class="empty">· · ·</div>
@@ -3770,9 +5028,7 @@ async function renderAdmin(app) {
 
 function adminSwitch(tab) {
   adminTab = tab;
-  document.querySelectorAll('.admin-tab').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase().includes(
-    tab==='stats'?'стат':tab==='users'?'польз':tab==='drops'?'drop':tab==='reports'?'жал':tab==='verify'?'верифик':'инв'
-  )));
+  document.querySelectorAll('.admin-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   loadAdminTab();
 }
 
@@ -3799,7 +5055,7 @@ async function loadAdminTab() {
       const users = await api('/admin/users');
       el.innerHTML = `
         <div class="admin-search-row">
-          <input class="input" id="adminUserSearch" placeholder="Поиск по нику..." oninput="adminFilterUsers()" style="max-width:260px">
+          <input class="input" id="adminUserSearch" placeholder="Поиск по нику..." style="max-width:260px">
         </div>
         <div id="adminUserList" class="admin-list">
           ${users.map(u => adminUserRow(u)).join('')}
@@ -3816,7 +5072,7 @@ async function loadAdminTab() {
             <span class="admin-row-name">${esc(d.display_name)} <span class="fg3">@${esc(d.username)}</span></span>
             <span class="admin-row-meta">${esc(d.content||'—')} · ${d.views} просмотров · ${timeAgo(d.created_at)}</span>
           </div>
-          <button class="btn btn-sm btn-danger" onclick="adminDelDrop('${esc(d.id)}')">УДАЛИТЬ</button>
+          <button class="btn btn-sm btn-danger btn-ic-row" data-post-action="admin-del-drop" data-drop-id="${esc(d.id)}">${iconCut('trash', 'ui-icon', 14, 14)}УДАЛИТЬ</button>
         </div>
       `).join('')}</div>`;
     } else if (adminTab === 'invites') {
@@ -3839,8 +5095,8 @@ async function loadAdminTab() {
             <span class="admin-row-meta">от @${esc(r.reporter_username)} · ${esc(r.reason)} · ${timeAgo(r.created_at)}</span>
           </div>
           <div class="admin-actions">
-            ${r.target_type==='post'?`<button class="btn btn-sm btn-ghost" onclick="go('feed')">↗ ПЕРЕЙТИ</button>`:''}
-            <button class="btn btn-sm" onclick="adminResolveReport('${esc(r.id)}')">ЗАКРЫТЬ</button>
+            ${r.target_type==='post'?`<button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-feed">${iconCut('forward', 'ui-icon', 13, 13)}ПЕРЕЙТИ</button>`:''}
+            <button class="btn btn-sm btn-ic-row" data-post-action="admin-resolve-report" data-report-id="${esc(r.id)}">${iconCut('check', 'ui-icon', 13, 13)}ЗАКРЫТЬ</button>
           </div>
         </div>
       `).join('')}</div>`;
@@ -3858,13 +5114,74 @@ async function loadAdminTab() {
             <span class="admin-row-meta vreq-reason">${esc(r.reason)}</span>
           </div>
           <div class="admin-actions">
-            <button class="btn btn-sm" onclick="adminApproveVerify('${esc(r.id)}')">✓ ПРИНЯТЬ</button>
-            <button class="btn btn-sm btn-danger" onclick="adminRejectVerify('${esc(r.id)}')">✕ ОТКЛОНИТЬ</button>
+            <button class="btn btn-sm btn-ic-row" data-post-action="admin-approve-verify" data-request-id="${esc(r.id)}">${iconCut('check', 'ui-icon', 13, 13)}ПРИНЯТЬ</button>
+            <button class="btn btn-sm btn-danger btn-ic-row" data-post-action="admin-reject-verify" data-request-id="${esc(r.id)}">${iconCut('close', 'ui-icon', 13, 13)}DECLINE</button>
           </div>
         </div>
       `).join('')}</div>`;
+    } else if (adminTab === 'diag') {
+      const d = await api('/admin/diagnostics');
+      const jq = await api('/admin/jobs?limit=15');
+      const mem = d.memory || {};
+      const db = d.db || {};
+      const jb = d.background_jobs || {};
+      const jobs = Array.isArray(jq.jobs) ? jq.jobs : [];
+      const errs = Array.isArray(d.recent_errors) ? d.recent_errors : [];
+      el.innerHTML = `
+        <div class="admin-stats">
+          <div class="stat-card"><div class="stat-val">${Math.floor((d.uptime_sec || 0) / 60)}м</div><div class="stat-lbl">uptime</div></div>
+          <div class="stat-card"><div class="stat-val">${esc(d.node || 'n/a')}</div><div class="stat-lbl">node</div></div>
+          <div class="stat-card"><div class="stat-val">${fmtBytes(mem.rss || 0)}</div><div class="stat-lbl">rss</div></div>
+          <div class="stat-card"><div class="stat-val">${fmtBytes(mem.heap_used || 0)}</div><div class="stat-lbl">heap used</div></div>
+          <div class="stat-card"><div class="stat-val">${db.users || 0}</div><div class="stat-lbl">users</div></div>
+          <div class="stat-card"><div class="stat-val">${db.messages || 0}</div><div class="stat-lbl">messages</div></div>
+          <div class="stat-card"><div class="stat-val">${db.files || 0}</div><div class="stat-lbl">disk files</div></div>
+          <div class="stat-card"><div class="stat-val">${db.reports_open || 0}</div><div class="stat-lbl">open reports</div></div>
+          <div class="stat-card"><div class="stat-val">${jb.pending ?? 0}</div><div class="stat-lbl">jobs pending</div></div>
+          <div class="stat-card"><div class="stat-val">${jb.failed ?? 0}</div><div class="stat-lbl">jobs failed</div></div>
+        </div>
+        <div class="admin-diag-meta">build: ${esc(d.build || 'n/a')} · env: ${esc(d.env || 'n/a')} · req: ${esc(d.req_id || 'n/a')}
+          · <button type="button" class="btn btn-sm btn-ghost btn-ic-row" data-post-action="admin-diag-refresh">${iconCut('download', 'ui-icon', 12, 12)}обновить</button>
+          · <button type="button" class="btn btn-sm btn-ic-row" data-post-action="admin-enqueue-noop-job">${iconCut('add', 'ui-icon', 12, 12)}noop job</button>
+        </div>
+        <div class="admin-list admin-job-list">
+          ${jobs.length ? jobs.map(j => `
+            <div class="admin-row">
+              <div class="admin-row-info">
+                <span class="admin-row-name">${esc(j.type)} <span class="fg3">${esc(j.status)}</span> · att ${esc(String(j.attempts))}</span>
+                <span class="admin-row-meta">${esc(j.created_at || '')} → ${esc(j.updated_at || '')}</span>
+                <span class="admin-row-meta mono-sm">${esc(j.id || '').slice(0, 10)}… ${esc(j.error_short || '')}</span>
+              </div>
+            </div>
+          `).join('') : '<div class="empty">Нет задач в очереди</div>'}
+        </div>
+        <div class="admin-list">
+          ${errs.length ? errs.map(er => `
+            <div class="admin-row">
+              <div class="admin-row-info">
+                <span class="admin-row-name">${esc(er.method || 'UNK')} ${esc(er.path || '-')} <span class="fg3">(${esc(String(er.status || 500))})</span></span>
+                <span class="admin-row-meta">${esc(er.at || '')} · req ${esc(er.req_id || 'n/a')}</span>
+                <span class="admin-row-meta">${esc(er.message || 'Unknown error')}</span>
+              </div>
+            </div>
+          `).join('') : '<div class="empty">Ошибок в буфере нет</div>'}
+        </div>
+      `;
     }
   } catch (e) { el.innerHTML = `<div class="empty msg-err">${esc(e.message)}</div>`; }
+}
+
+async function adminDiagRefresh() {
+  if (adminTab !== 'diag') return;
+  await loadAdminTab();
+}
+
+async function adminEnqueueNoopJob() {
+  try {
+    const r = await api('/admin/jobs/test', { method: 'POST', body: { type: 'noop' } });
+    toast(r.job_id ? `В очередь: ${r.job_id.slice(0, 8)}…` : 'В очередь');
+    await loadAdminTab();
+  } catch (e) { toast.error(e.message); }
 }
 
 async function adminResolveReport(rid) {
@@ -3888,10 +5205,10 @@ function adminUserRow(u) {
       </div>
       ${isMe ? '' : `
         <div class="admin-actions">
-          <button class="btn btn-sm ${isBanned?'':'btn-danger'}" onclick="adminBan('${esc(u.id)}','${esc(u.username)}',${isBanned})">${isBanned?'РАЗБАН':'БАН'}</button>
-          ${!u.is_admin ? `<button class="btn btn-sm" onclick="adminPromote('${esc(u.id)}','${esc(u.username)}',${!!u.is_admin})">ADMIN ${u.is_admin?'↓':'↑'}</button>` : ''}
-          <button class="btn btn-sm ${u.is_verified?'btn-ghost':''}" onclick="adminVerify('${esc(u.id)}','${esc(u.username)}',${!!u.is_verified},'${esc(u.badge_type||'')}')">${u.is_verified?`${verifiedBadge(true,u.badge_type)} ВЕРИФИЦИРОВАН`:'ВЕРИФИЦИРОВАТЬ'}</button>
-          ${!u.is_admin ? `<button class="btn btn-sm btn-danger" onclick="adminDeleteUser('${esc(u.id)}','${esc(u.username)}')">✕</button>` : ''}
+          <button class="btn btn-sm btn-ic-row ${isBanned?'':'btn-danger'}" data-post-action="admin-ban" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}" data-is-banned="${isBanned ? '1' : '0'}">${isBanned ? iconCut('unlock', 'ui-icon', 13, 13) + 'РАЗБАН' : iconCut('lock', 'ui-icon', 13, 13) + 'БАН'}</button>
+          ${!u.is_admin ? `<button class="btn btn-sm btn-ic-row" data-post-action="admin-promote" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}" data-is-admin="0">${iconCut('add', 'ui-icon', 12, 12)}ADMIN</button>` : ''}
+          <button class="btn btn-sm btn-ic-row ${u.is_verified?'btn-ghost':''}" data-post-action="admin-verify" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}" data-is-verified="${u.is_verified ? '1' : '0'}" data-badge-type="${esc(u.badge_type||'')}">${u.is_verified?`${verifiedBadge(true,u.badge_type)} ВЕРИФИЦИРОВАН`:`${iconCut('check', 'ui-icon', 13, 13)}ВЕРИФИЦИРОВАТЬ`}</button>
+          ${!u.is_admin ? `<button class="btn btn-sm btn-danger" data-post-action="admin-delete-user" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}" aria-label="Удалить">${iconCut('trash', 'ui-icon', 15, 15)}</button>` : ''}
         </div>
       `}
     </div>
@@ -3970,29 +5287,32 @@ function renderAuth(app, mode) {
   const isLogin = mode === 'login';
   app.innerHTML = `
     <div class="auth-wrap">
+      ${opiumCoreHero('auth')}
       <h1>${isLogin ? 'ВХОД' : 'РЕГИСТРАЦИЯ'}</h1>
       <div class="auth-form">
         ${!isLogin ? '<input class="input" id="aName" placeholder="Имя артиста" autocomplete="name">' : ''}
         <input class="input" id="aUser" placeholder="${isLogin ? 'Email или Username' : 'Username'}" autocapitalize="off" autocomplete="${isLogin ? 'username' : 'username'}">
         ${!isLogin ? '<input class="input" id="aEmail" type="email" placeholder="Email" autocomplete="email">' : ''}
-        <input class="input" id="aPass" type="password" placeholder="Пароль" autocomplete="${isLogin ? 'current-password' : 'new-password'}" ${!isLogin ? 'oninput="checkPwStrength(this.value)"' : ''}>
+        <input class="input" id="aPass" type="password" placeholder="Пароль" autocomplete="${isLogin ? 'current-password' : 'new-password'}">
         ${!isLogin ? '<div id="pwStrength" class="pw-strength"></div>' : ''}
         ${!isLogin ? '<input class="input" id="aPass2" type="password" placeholder="Повтори пароль" autocomplete="new-password">' : ''}
         ${!isLogin ? '<input class="input" id="aInvite" placeholder="Инвайт-код / Мастер-код W0PIUM" autocapitalize="characters" spellcheck="false" autocomplete="off">' : ''}
-        <button class="btn" onclick="doAuth('${mode}')">${isLogin ? 'ВОЙТИ' : 'СОЗДАТЬ'}</button>
+        <button class="btn btn-ic-row" data-post-action="do-auth" data-mode="${mode}">${isLogin ? `${iconCut('lock', 'ui-icon', 15, 15)}ВОЙТИ` : `${iconCut('add', 'ui-icon', 15, 15)}СОЗДАТЬ`}</button>
         <div id="aErr" class="msg-err"></div>
       </div>
-      ${isLogin ? '<div class="auth-forgot"><span onclick="showForgotStep()">Забыл пароль?</span></div>' : ''}
+      ${isLogin ? '<div class="auth-forgot"><span data-post-action="show-forgot-step">Забыл пароль?</span></div>' : ''}
       <div class="auth-switch">
         ${isLogin
-          ? 'Нет аккаунта? <span onclick="go(\'register\')">РЕГИСТРАЦИЯ</span>'
-          : 'Уже есть аккаунт? <span onclick="go(\'login\')">ВОЙТИ</span>'}
+          ? 'Нет аккаунта? <span data-post-action="go-register">РЕГИСТРАЦИЯ</span>'
+          : 'Уже есть аккаунт? <span data-post-action="go-login">ВОЙТИ</span>'}
       </div>
     </div>
   `;
   setTimeout(() => {
     if (pendingVerifyUsername) { showVerifyStep(pendingVerifyUsername); return; }
     $$('.auth-form input').forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(mode); }));
+    const passEl = document.getElementById('aPass');
+    if (passEl && !isLogin) passEl.addEventListener('input', e => checkPwStrength(e.target.value));
     (isLogin ? $('#aUser') : $('#aName'))?.focus();
   }, 50);
 }
@@ -4060,8 +5380,8 @@ function showVerifyStep(username) {
   form.innerHTML = `
     <p class="verify-note">Код отправлен на твой email.</p>
     <input class="input" id="vCode" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
-    <button class="btn" onclick="doVerify('${esc(username)}')">ПОДТВЕРДИТЬ</button>
-    <button class="btn-ghost" onclick="resendVerify('${esc(username)}')">Отправить снова</button>
+    <button class="btn btn-ic-row" data-post-action="do-verify" data-username="${esc(username)}">${iconCut('check', 'ui-icon', 15, 15)}ПОДТВЕРДИТЬ</button>
+    <button class="btn-ghost btn-ic-row" data-post-action="resend-verify" data-username="${esc(username)}">${iconCut('send', 'ui-icon', 14, 14)}Отправить снова</button>
     <div id="vErr" class="msg-err"></div>
   `;
   setTimeout(() => {
@@ -4109,8 +5429,8 @@ function showForgotStep() {
   form.innerHTML = `
     <p class="verify-note">Введи email — отправим код для сброса пароля.</p>
     <input class="input" id="fEmail" type="email" placeholder="Email" autocomplete="email">
-    <button class="btn" onclick="doForgot()">ОТПРАВИТЬ КОД</button>
-    <button class="btn-ghost" onclick="go('login')">← НАЗАД</button>
+    <button class="btn btn-ic-row" data-post-action="do-forgot">${iconCut('send', 'ui-icon', 15, 15)}ОТПРАВИТЬ КОД</button>
+    <button class="btn-ghost btn-ic-row" data-post-action="go-login">${iconCut('back', 'ui-icon', 14, 14)} НАЗАД</button>
     <div id="fErr" class="msg-err"></div>
   `;
   setTimeout(() => {
@@ -4140,9 +5460,9 @@ function showResetStep(email) {
     <p class="verify-note">Код отправлен на твой email.</p>
     <input class="input" id="rCode" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
     <input class="input" id="rPass" type="password" placeholder="Новый пароль" autocomplete="new-password">
-    <button class="btn" onclick="doReset('${esc(email)}')">СМЕНИТЬ ПАРОЛЬ</button>
-    <button class="btn-ghost" onclick="doResendReset('${esc(email)}')">Выслать код ещё раз</button>
-    <button class="btn-ghost" onclick="showForgotStep()">← НАЗАД</button>
+    <button class="btn btn-ic-row" data-post-action="do-reset" data-email="${esc(email)}">${iconCut('check', 'ui-icon', 15, 15)}СМЕНИТЬ ПАРОЛЬ</button>
+    <button class="btn-ghost btn-ic-row" data-post-action="do-resend-reset" data-email="${esc(email)}">${iconCut('send', 'ui-icon', 14, 14)}Выслать код ещё раз</button>
+    <button class="btn-ghost btn-ic-row" data-post-action="show-forgot-step">${iconCut('back', 'ui-icon', 14, 14)} НАЗАД</button>
     <div id="rErr" class="msg-err"></div>
   `;
   setTimeout(() => {
@@ -4325,10 +5645,10 @@ function vpPreviewToggle() {
   if (!audio) return;
   if (audio.paused) {
     audio.play();
-    if (btn) btn.textContent = '⏸';
+    if (btn) btn.innerHTML = playPauseIconHtml(true, 16, 16);
   } else {
     audio.pause();
-    if (btn) btn.textContent = '▶';
+    if (btn) btn.innerHTML = playPauseIconHtml(false, 16, 16);
   }
 }
 
@@ -4343,17 +5663,15 @@ function vpCycleSpeed(btn) {
   btn.textContent = next + '×';
 }
 
-function voicePlayerHtml(src, mid, fname) {
+function voicePlayerHtml(src, mid, fname, inChat) {
   const id = 'vp_' + String(mid).replace(/[^a-z0-9]/gi, '');
-  return `<div class="voice-player" id="${id}">
-    <button class="vp-play-btn" onclick="vpToggle('${id}','${esc(src)}')">▶</button>
+  const chatCls = inChat ? ' vp-chat' : '';
+  return `<div class="voice-player${chatCls}" id="${id}">
+    <button class="vp-play-btn" data-post-action="vp-toggle" data-vp-id="${id}" data-vp-src="${esc(src)}" aria-label="Play">${playPauseIconHtml(false, 14, 14)}</button>
     <canvas class="vp-wave" width="140" height="28"></canvas>
     <span class="vp-dur" id="${id}_dur">0:00</span>
-    <button class="vp-speed-btn" onclick="vpCycleSpeed(this)" title="Скорость">1×</button>
-    <audio id="${id}_audio" src="${esc(src)}" preload="none" style="display:none"
-      ontimeupdate="vpTimeUpdate('${id}')"
-      onended="vpEnded('${id}')"
-    ></audio>
+    <button class="vp-speed-btn" data-post-action="vp-cycle-speed" title="Скорость">1×</button>
+    <audio id="${id}_audio" src="${esc(src)}" preload="none" style="display:none" data-vp-audio-id="${id}"></audio>
   </div>`;
 }
 
@@ -4363,6 +5681,11 @@ async function vpToggle(id, src) {
   const audio = document.getElementById(id + '_audio');
   const btn = document.querySelector(`#${id} .vp-play-btn`);
   if (!audio) return;
+  if (!audio.dataset.vpBound) {
+    audio.addEventListener('timeupdate', () => vpTimeUpdate(id));
+    audio.addEventListener('ended', () => vpEnded(id));
+    audio.dataset.vpBound = '1';
+  }
   if (audio.paused) {
     // Pause all other players
     document.querySelectorAll('.voice-player audio').forEach(a => {
@@ -4370,17 +5693,17 @@ async function vpToggle(id, src) {
         a.pause();
         const otherId = a.id.replace('_audio', '');
         const otherBtn = document.querySelector(`#${otherId} .vp-play-btn`);
-        if (otherBtn) otherBtn.textContent = '▶';
+        if (otherBtn) otherBtn.innerHTML = playPauseIconHtml(false, 14, 14);
         if (_vpCtx[otherId]?.anim) { cancelAnimationFrame(_vpCtx[otherId].anim); }
       }
     });
     audio.src = src;
     await audio.play().catch(() => {});
-    if (btn) btn.textContent = '⏸';
+    if (btn) btn.innerHTML = playPauseIconHtml(true, 14, 14);
     vpStartWave(id, audio);
   } else {
     audio.pause();
-    if (btn) btn.textContent = '▶';
+    if (btn) btn.innerHTML = playPauseIconHtml(false, 14, 14);
     if (_vpCtx[id]?.anim) cancelAnimationFrame(_vpCtx[id].anim);
   }
 }
@@ -4405,7 +5728,21 @@ function vpStartWave(id, audio) {
       _vpCtx[id].anim = requestAnimationFrame(draw);
       analyser.getByteFrequencyData(buf);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = 'var(--accent, #7c3aed)';
+      const player = canvas.closest('.voice-player');
+      let fill = '#7c3aed';
+      if (player) {
+        if (player.closest('.msg.me')) {
+          try {
+            fill = getComputedStyle(player).color || fill;
+          } catch {
+            fill = 'rgba(0,0,0,0.78)';
+          }
+        } else {
+          const ac = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+          if (ac) fill = ac;
+        }
+      }
+      ctx.fillStyle = fill;
       const bw = (canvas.width / buf.length) * 2.5;
       let x = 0;
       for (let i = 0; i < buf.length; i++) {
@@ -4428,7 +5765,7 @@ function vpTimeUpdate(id) {
 
 function vpEnded(id) {
   const btn = document.querySelector(`#${id} .vp-play-btn`);
-  if (btn) btn.textContent = '▶';
+  if (btn) btn.innerHTML = playPauseIconHtml(false, 14, 14);
   if (_vpCtx[id]?.anim) { cancelAnimationFrame(_vpCtx[id].anim); }
   const canvas = document.querySelector(`#${id} .vp-wave`);
   if (canvas) canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
@@ -4469,12 +5806,12 @@ async function forwardMsg(mid, cid) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.innerHTML = `<div class="modal">
-    <div class="modal-head"><b>Переслать в...</b><button type="button" class="modal-icon-dismiss" onclick="this.closest('.modal-overlay').remove()" aria-label="Закрыть">✕</button></div>
+    <div class="modal-head"><b>Переслать в...</b><button type="button" class="modal-icon-dismiss" data-post-action="close-modal-overlay" aria-label="Закрыть">${iconCut('close', 'ui-icon', 18, 18)}</button></div>
     <div class="modal-scroll-y">
       ${others.map(c => {
         const other = (c.members||[]).find(u => u.id !== (window.me?.id));
         const name = c.is_group ? (c.title || 'Группа') : (other?.display_name || 'Диалог');
-        return `<div class="modal-list-item modal-list-item--row" onclick="doForwardMsg('${mid}','${cid}','${c.id}',this.closest('.modal-overlay'))">
+        return `<div class="modal-list-item modal-list-item--row" data-post-action="do-forward-msg" data-mid="${mid}" data-src-cid="${cid}" data-target-cid="${c.id}">
           ${avatarEl(other?.avatar,'avatar-sm',initial(name))}
           <span>${esc(name)}</span>
         </div>`;
@@ -4501,7 +5838,7 @@ async function toggleChatMute(cid) {
       await api(`/chats/${cid}/mute`, { method: 'PATCH', body: { hours: 0 } });
       window._chatMutedUntil = null;
       const btn = document.getElementById('chatMuteBtn');
-      if (btn) btn.textContent = '🔔';
+      if (btn) btn.innerHTML = iconCut('notifications', 'ui-icon', 18, 18);
       toast('Уведомления включены');
     } catch(e) { toast.error(e.message || 'Ошибка'); }
   } else {
@@ -4515,8 +5852,8 @@ async function toggleChatMute(cid) {
     modal.className = 'modal-overlay';
     modal.innerHTML = `<div class="modal modal--mute">
       <div class="modal-head"><b>Отключить уведомления</b></div>
-      ${opts.map(o => `<div class="modal-list-item" onclick="doChatMute('${cid}',${o.hours},this.closest('.modal-overlay'))">${esc(o.label)}</div>`).join('')}
-      <div class="modal-list-item modal-list-item--muted" onclick="this.closest('.modal-overlay').remove()">Отмена</div>
+      ${opts.map(o => `<div class="modal-list-item" data-post-action="do-chat-mute" data-conv-id="${cid}" data-mute-hours="${o.hours}">${esc(o.label)}</div>`).join('')}
+      <div class="modal-list-item modal-list-item--muted modal-list-item--ic" data-post-action="close-modal-overlay">${iconCut('close', 'ui-icon', 14, 14)}Отмена</div>
     </div>`;
     document.body.appendChild(modal);
   }
@@ -4528,12 +5865,95 @@ async function doChatMute(cid, hours, modal) {
     const r = await api(`/chats/${cid}/mute`, { method: 'PATCH', body: { hours } });
     window._chatMutedUntil = r.muted_until;
     const btn = document.getElementById('chatMuteBtn');
-    if (btn) btn.textContent = '🔕';
+    if (btn) btn.innerHTML = iconCut('mute', 'ui-icon', 18, 18);
     toast('Уведомления отключены');
   } catch(e) { toast.error(e.message || 'Ошибка'); }
 }
 
 // ── CHAT MENTION AUTOCOMPLETE ──
+
+async function toggleChatPin(cid) {
+  const conv = window._currentChatConv;
+  const pinned = !conv?.pinned_at;
+  try {
+    const r = await api(`/chats/${cid}/state`, { method: 'PATCH', body: { pinned } });
+    if (window._currentChatConv) window._currentChatConv.pinned_at = r.pinned_at;
+    toast(pinned ? 'Чат закреплен' : 'Чат откреплен');
+    renderChat(document.getElementById('app'), cid);
+  } catch(e) { toast.error(e.message || 'Ошибка'); }
+}
+
+async function toggleChatArchive(cid, archivedNow = false) {
+  const archived = !archivedNow;
+  try {
+    await api(`/chats/${cid}/state`, { method: 'PATCH', body: { archived } });
+    toast(archived ? 'Чат в архиве' : 'Чат возвращен');
+    if (archived) go('chats');
+    else renderChat(document.getElementById('app'), cid);
+  } catch(e) { toast.error(e.message || 'Ошибка'); }
+}
+
+function toggleChatToolsMenu(btn) {
+  const wrap = btn?.closest('.chat-tools-more');
+  const menu = wrap?.querySelector('.chat-tools-menu');
+  if (!menu) return;
+  const willOpen = menu.classList.contains('hidden');
+  document.querySelectorAll('.chat-tools-menu').forEach(el => el.classList.add('hidden'));
+  menu.classList.toggle('hidden', !willOpen);
+  if (willOpen) {
+    const onDocClick = ev => {
+      if (wrap.contains(ev.target)) return;
+      menu.classList.add('hidden');
+      document.removeEventListener('click', onDocClick, true);
+    };
+    setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
+  }
+}
+
+async function toggleSaveMsg(mid, cid, savedNow = false) {
+  if (!mid || !cid) return;
+  try {
+    const saved = !savedNow;
+    await api(`/chats/${cid}/messages/${mid}/save`, { method: saved ? 'POST' : 'DELETE' });
+    const msg = document.querySelector(`.msg[data-id="${CSS.escape(mid)}"]`);
+    if (msg) {
+      msg.dataset.saved = saved ? '1' : '0';
+      const btn = msg.querySelector('.msg-more-btn');
+      if (btn) btn.dataset.saved = saved ? '1' : '0';
+      msg.querySelector('.msg-saved-mark')?.remove();
+      if (saved) {
+        msg.querySelector('.msg-body')?.insertAdjacentHTML('afterbegin', `<div class="msg-saved-mark">${iconCut('bookmark-filled', 'ui-icon msg-inline-ic', 11, 11)}<span>Сохранено</span></div>`);
+      }
+    }
+    toast(saved ? 'Сообщение сохранено' : 'Удалено из сохраненных');
+  } catch(e) { toast.error(e.message || 'Ошибка'); }
+}
+
+async function openSavedMessages(cid = '') {
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `<div class="modal saved-msg-modal">
+    <div class="modal-head"><b>Сохраненные</b><button type="button" class="modal-icon-dismiss" data-post-action="close-modal-overlay" aria-label="Закрыть">${iconCut('close', 'ui-icon', 18, 18)}</button></div>
+    <div id="savedMsgList" class="saved-msg-list"><div class="gallery-state-msg">Загрузка...</div></div>
+  </div>`;
+  document.body.appendChild(modal);
+  const el = document.getElementById('savedMsgList');
+  try {
+    let rows = await api('/chats/saved');
+    if (cid) rows = rows.filter(m => m.conv_id === cid);
+    if (!rows.length) { el.innerHTML = '<div class="gallery-state-msg">Нет сохраненных сообщений</div>'; return; }
+    el.innerHTML = rows.map(m => {
+      const text = m.content || m.file_name || (m.file_type ? `[${m.file_type}]` : 'Сообщение');
+      const chatName = m.is_group ? (m.title || 'Группа') : 'Диалог';
+      return `<div class="saved-msg-row" data-post-action="jump-to-message" data-msg-id="${esc(m.id)}" data-conv-id="${esc(m.conv_id)}">
+        <div class="saved-msg-top"><b>${esc(m.display_name || '')}</b><span>${esc(chatName)} · ${timeAgo(m.saved_at || m.created_at)}</span></div>
+        <div class="saved-msg-text">${esc(text.slice(0, 180))}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="gallery-state-msg">${esc(e.message || 'Ошибка')}</div>`;
+  }
+}
 
 function bindChatMentionAutocomplete(textarea, members) {
   const dropdown = document.createElement('div');
@@ -4554,8 +5974,7 @@ function bindChatMentionAutocomplete(textarea, members) {
     if (!matches.length) { dropdown.style.display = 'none'; return; }
     dropdown.style.display = 'block';
     dropdown.innerHTML = matches.map(m => `
-      <div class="mention-item-row"
-        onmousedown="event.preventDefault();insertChatMention(${JSON.stringify(textarea.id)},'${esc(m.username)}')">
+      <div class="mention-item-row" data-post-action="insert-chat-mention" data-textarea-id="${textarea.id}" data-username="${esc(m.username)}">
         ${avatarEl(m.avatar,'avatar-xs',initial(m.display_name))}
         <span>${esc(m.display_name)}</span>
         <span class="mention-item-handle">@${esc(m.username)}</span>
@@ -4591,20 +6010,20 @@ function dropHtml(d) {
       const encoded = encodeURIComponent(url);
       track = `<iframe class="sc-player" width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encoded}&amp;color=%231c1c1c&amp;auto_play=false&amp;hide_related=true&amp;show_comments=false&amp;show_user=false&amp;show_reposts=false"></iframe>`;
     } else {
-      track = `<div class="post-track">♫ <a href="${safeUrl(url)}" target="_blank" rel="noopener">${truncUrl(url)}</a></div>`;
+      track = `<div class="post-track">${iconCut('mic', 'ui-icon post-track-ic', 12, 12)} <a href="${safeUrl(url)}" target="_blank" rel="noopener">${truncUrl(url)}</a></div>`;
     }
   }
-  const img = d.image ? `<div class="post-img" onclick="openImg('${esc(d.image)}')"><img src="${esc(d.image)}" loading="lazy" alt=""></div>` : '';
+  const img = d.image ? `<div class="post-img" data-post-action="open-image" data-image="${esc(d.image)}"><img src="${esc(d.image)}" loading="lazy" alt=""></div>` : '';
   return `
     <div class="drop${d.viewed ? '' : ' drop-new'}" data-id="${d.id}">
       <div class="drop-meta">
         <span class="drop-timer">${hoursLeft}ч</span>
         <span class="drop-views">◎ ${d.view_count}</span>
-        ${mine ? `<button class="btn-link" onclick="delDrop('${d.id}')">✕</button>` : ''}
+        ${mine ? `<button class="btn-link" data-post-action="delete-drop" data-drop-id="${d.id}" aria-label="Удалить">${iconCut('trash', 'ui-icon', 14, 14)}</button>` : ''}
       </div>
       <div class="post-head">
         ${avatarEl(d.avatar, 'avatar', initial(d.display_name))}
-        <span class="post-name" onclick="go('profile','${esc(d.username)}')">${esc(d.display_name)}</span>
+        <span class="post-name" data-post-action="go-profile" data-username="${esc(d.username)}">${esc(d.display_name)}</span>
         <span class="post-handle">@${esc(d.username)}</span>
         <span class="post-time">${timeAgoEl(d.created_at)}</span>
       </div>
@@ -4624,17 +6043,17 @@ function dropComposerHtml() {
       <div class="composer-toolbar">
         <div class="composer-tools">
           <div class="attach-wrap" id="dAttachWrap">
-            <button class="composer-tool attach-btn" onclick="toggleAttachMenu('d')" title="Прикрепить">⊕</button>
+            <button class="composer-tool attach-btn" data-post-action="toggle-attach-menu" data-prefix="d" title="Прикрепить">${iconCut('attach', 'ui-icon', 17, 17)}</button>
             <div class="attach-menu hidden" id="dAttachMenu">
-              <label class="attach-opt" for="dImg" onclick="closeAttachMenu('d')">↑ фото</label>
-              <button class="attach-opt" onclick="selectTrack('d')">♫ soundcloud</button>
+              <label class="attach-opt" for="dImg" data-post-action="close-attach-menu" data-prefix="d">UP фото</label>
+              <button class="attach-opt" data-post-action="select-track" data-prefix="d">SC soundcloud</button>
             </div>
           </div>
           <input type="file" id="dImg" accept="image/*,.heic,.heif" style="display:none">
         </div>
         <div class="composer-submit">
           <input type="text" id="dTrack" placeholder="soundcloud.com/..." class="track-input hidden">
-          <button class="btn btn-sm" onclick="submitDrop()">ДРОП</button>
+          <button class="btn btn-sm btn-ic-row" data-post-action="submit-drop">${iconCut('upload', 'ui-icon', 14, 14)}ДРОП</button>
         </div>
       </div>
       <div id="dImgName" style="font-size:0.6rem;color:var(--fg3);margin-top:0.3rem"></div>
@@ -4685,7 +6104,8 @@ async function renderDrops(app) {
       api(`/drops/${d.id}/view`, { method: 'POST' }).catch(() => {})
     );
     app.innerHTML = `
-      <div class="page-title">DROPS</div>
+      ${opiumCommandStrip('drops')}
+      ${pageTitleIc('media', 'DROPS')}
       ${dropComposerHtml()}
       <div id="dropList">${drops.length ? drops.map(dropHtml).join('') :
         '<div class="empty">Нет дропов. Брось что-нибудь.</div>'}</div>
@@ -4736,21 +6156,22 @@ function diskFileType(mime, name) {
 function diskThumbHtml(f) {
   const type = diskFileType(f.mime, f.name);
   if (type === 'image') return `<img class="disk-thumb-img" src="${esc(f.path)}" loading="lazy" alt="">`;
-  if (type === 'audio') return `<div class="disk-thumb-icon audio"><span>♫</span></div>`;
-  if (type === 'video') return `<div class="disk-thumb-icon video"><span>▶</span></div>`;
-  if (type === 'text') return `<div class="disk-thumb-icon text"><span>TXT</span></div>`;
+  if (type === 'audio') return `<div class="disk-thumb-icon audio">${iconCut('mic', 'ui-icon', 22, 22)}</div>`;
+  if (type === 'video') return `<div class="disk-thumb-icon video">${iconCut('play', 'ui-icon', 22, 22)}</div>`;
+  if (type === 'text') return `<div class="disk-thumb-icon text">${iconCut('comment', 'ui-icon', 22, 22)}</div>`;
   const ext = (f.name || '').split('.').pop().toUpperCase().slice(0, 4);
-  return `<div class="disk-thumb-icon file"><span>${ext || '?'}</span></div>`;
+  return `<div class="disk-thumb-icon file">${iconCut('file', 'ui-icon', 20, 20)}${ext ? `<span class="disk-thumb-ext">${esc(ext)}</span>` : ''}</div>`;
 }
 
 function diskFolderCardHtml(folder) {
   return `<div class="disk-card disk-folder" id="dfolder-${esc(folder.id)}"
-    onclick="loadDiskFolder('${esc(folder.id)}')"
-    ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-target')"
-    ondragleave="this.classList.remove('drag-target')"
-    ondrop="diskFileDrop('${esc(folder.id)}',event)">
-    <button class="disk-card-del" onclick="event.stopPropagation();deleteDiskFolder('${esc(folder.id)}')" title="Удалить">✕</button>
-    <div class="disk-card-thumb"><div class="disk-thumb-icon folder"><span>◉</span></div></div>
+    data-post-action="disk-load-folder" data-folder-id="${esc(folder.id)}"
+    data-post-action-dragover="disk-folder-dragover"
+    data-post-action-dragleave="disk-folder-dragleave"
+    data-post-action-drop="disk-folder-drop"
+    data-folder-drop-id="${esc(folder.id)}">
+    <button class="disk-card-del" data-post-action="disk-delete-folder" data-folder-id="${esc(folder.id)}" title="Удалить">${iconCut('trash', 'ui-icon', 15, 15)}</button>
+    <div class="disk-card-thumb"><div class="disk-thumb-icon folder">${iconCut('disk', 'ui-icon', 24, 24)}</div></div>
     <div class="disk-card-info">
       <div class="disk-card-name" title="${esc(folder.name)}">${esc(folder.name)}</div>
       <div class="disk-card-size">${folder.item_count} эл.</div>
@@ -4760,15 +6181,16 @@ function diskFolderCardHtml(folder) {
 
 function diskFolderRowHtml(folder) {
   return `<div class="disk-row disk-folder-row" id="dfolder-${esc(folder.id)}"
-    onclick="loadDiskFolder('${esc(folder.id)}')"
-    ondragover="event.preventDefault();event.stopPropagation();this.classList.add('drag-target')"
-    ondragleave="this.classList.remove('drag-target')"
-    ondrop="diskFileDrop('${esc(folder.id)}',event)">
-    <span class="disk-row-icon">◉</span>
+    data-post-action="disk-load-folder" data-folder-id="${esc(folder.id)}"
+    data-post-action-dragover="disk-folder-dragover"
+    data-post-action-dragleave="disk-folder-dragleave"
+    data-post-action-drop="disk-folder-drop"
+    data-folder-drop-id="${esc(folder.id)}">
+    <span class="disk-row-icon">${iconCut('disk', 'ui-icon', 22, 22)}</span>
     <div class="disk-row-info"><div class="disk-row-name">${esc(folder.name)}</div></div>
     <div class="disk-row-size">${folder.item_count} эл.</div>
     <div class="disk-row-date">${timeAgo(folder.created_at)}</div>
-    <button class="disk-row-del" onclick="event.stopPropagation();deleteDiskFolder('${esc(folder.id)}')" title="Удалить">✕</button>
+    <button class="disk-row-del" data-post-action="disk-delete-folder" data-folder-id="${esc(folder.id)}" title="Удалить">${iconCut('trash', 'ui-icon', 15, 15)}</button>
   </div>`;
 }
 
@@ -4778,12 +6200,13 @@ function diskCardHtml(f) {
   const sel = diskSelectMode && diskSelectedIds.has(f.id);
   return `<div class="disk-card disk-type-${type}${sel?' selected':''}" id="dfile-${esc(f.id)}"
     draggable="${!diskSelectMode}"
-    ondragstart="diskDragStart('${esc(f.id)}',event)"
-    ondragend="this.classList.remove('dragging-file')"
-    onclick="diskItemClick('${esc(f.id)}')">
+    data-post-action="disk-item-click" data-file-id="${esc(f.id)}"
+    data-post-action-dragstart="disk-drag-start"
+    data-post-action-dragend="disk-drag-end"
+    data-drag-file-id="${esc(f.id)}">
     ${diskSelectMode
       ? `<div class="disk-card-check${sel?' checked':''}"></div>`
-      : (canDelete ? `<button class="disk-card-del" onclick="event.stopPropagation();deleteDiskFile('${esc(f.id)}')" title="Удалить">✕</button>` : '')}
+      : (canDelete ? `<button class="disk-card-del" data-post-action="disk-delete-file" data-file-id="${esc(f.id)}" title="Удалить">${iconCut('trash', 'ui-icon', 15, 15)}</button>` : '')}
     <div class="disk-card-thumb">${diskThumbHtml(f)}</div>
     <div class="disk-card-info">
       <div class="disk-card-name" title="${esc(f.name)}">${esc(f.name)}</div>
@@ -4795,23 +6218,24 @@ function diskCardHtml(f) {
 function diskRowHtml(f) {
   const canDelete = me && (f.username === me.username || me.is_admin);
   const type = diskFileType(f.mime, f.name);
-  const icons = { image:'◻', audio:'♫', video:'▶', text:'≡', other:'◫' };
+  const rowIcons = { image: 'gallery', audio: 'mic', video: 'play', text: 'comment', other: 'file' };
   const sel = diskSelectMode && diskSelectedIds.has(f.id);
   return `<div class="disk-row${sel?' selected':''}" id="dfile-${esc(f.id)}"
     draggable="${!diskSelectMode}"
-    ondragstart="diskDragStart('${esc(f.id)}',event)"
-    ondragend="this.classList.remove('dragging-file')"
-    onclick="diskItemClick('${esc(f.id)}')">
+    data-post-action="disk-item-click" data-file-id="${esc(f.id)}"
+    data-post-action-dragstart="disk-drag-start"
+    data-post-action-dragend="disk-drag-end"
+    data-drag-file-id="${esc(f.id)}">
     ${diskSelectMode
       ? `<div class="disk-row-check${sel?' checked':''}"></div>`
-      : `<span class="disk-row-icon">${icons[type]||'📄'}</span>`}
+      : `<span class="disk-row-icon">${iconCut(rowIcons[type] || 'file', 'ui-icon', 22, 22)}</span>`}
     <div class="disk-row-info">
       <div class="disk-row-name">${esc(f.name)}</div>
       ${f.description ? `<div class="disk-row-desc">${esc(f.description)}</div>` : ''}
     </div>
     <div class="disk-row-size">${fmtBytes(f.size)}</div>
     <div class="disk-row-date">${timeAgo(f.created_at)}</div>
-    ${!diskSelectMode && canDelete ? `<button class="disk-row-del" onclick="event.stopPropagation();deleteDiskFile('${esc(f.id)}')" title="Удалить">✕</button>` : ''}
+    ${!diskSelectMode && canDelete ? `<button class="disk-row-del" data-post-action="disk-delete-file" data-file-id="${esc(f.id)}" title="Удалить">${iconCut('trash', 'ui-icon', 15, 15)}</button>` : ''}
   </div>`;
 }
 
@@ -4835,10 +6259,10 @@ function diskGetFiltered() {
 function renderDiskBreadcrumb() {
   const el = document.getElementById('diskBreadcrumb');
   if (!el) return;
-  const parts = [`<span class="disk-bc-item${!diskCurrentFolder?' active':''}" onclick="loadDiskFolder(null)">Диск</span>`];
+  const parts = [`<span class="disk-bc-item${!diskCurrentFolder?' active':''}" data-post-action="disk-load-root">Диск</span>`];
   diskFolderPath.forEach((f, i) => {
-    parts.push(`<span class="disk-bc-sep">›</span>`);
-    parts.push(`<span class="disk-bc-item${i===diskFolderPath.length-1?' active':''}" onclick="loadDiskFolder('${esc(f.id)}')">${esc(f.name)}</span>`);
+    parts.push(`<span class="disk-bc-sep">/</span>`);
+    parts.push(`<span class="disk-bc-item${i===diskFolderPath.length-1?' active':''}" data-post-action="disk-load-folder" data-folder-id="${esc(f.id)}">${esc(f.name)}</span>`);
   });
   el.innerHTML = parts.join('');
 }
@@ -4890,12 +6314,15 @@ function setDiskSort(field) {
 }
 
 function updateDiskSortUI() {
-  const arrow = diskSortDir === 'asc' ? ' ↑' : ' ↓';
+  const arrHtml = diskSortDir === 'asc'
+    ? iconCut('upload', 'ui-icon disk-sort-ic', 9, 9)
+    : iconCut('download', 'ui-icon disk-sort-ic', 9, 9);
   document.querySelectorAll('.disk-sort-btn').forEach(btn => {
     const f = btn.dataset.sort;
     const labels = { date: 'Дата', name: 'Имя', size: 'Размер' };
     btn.classList.toggle('active', diskSort === f);
-    btn.textContent = labels[f] + (diskSort === f ? arrow : '');
+    const arr = diskSort === f ? ` <span class="disk-sort-arr">${arrHtml}</span>` : '';
+    btn.innerHTML = `${labels[f]}${arr}`;
   });
 }
 
@@ -5148,24 +6575,24 @@ function _renderDiskPreview(f) {
   } else if (type === 'audio') {
     const wfId = 'diskWaveform_' + f.id.slice(0, 8);
     mediaHtml = `<div class="disk-preview-audio-wrap">
-      <div class="disk-preview-audio-icon">♫</div>
+      <div class="disk-preview-audio-icon">${iconCut('mic', 'ui-icon', 24, 24)}</div>
       <canvas id="${wfId}" class="disk-waveform disk-waveform-seek" width="600" height="80"></canvas>
       <audio id="diskPlayerAudio" src="${esc(f.path)}" preload="auto"></audio>
       <div class="disk-player-controls">
-        <button class="disk-player-btn" id="diskPlayerPlay" onclick="diskPlayPause()" title="Воспроизвести">
-          <svg id="diskPlayerPlayIcon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <button class="disk-player-btn" id="diskPlayerPlay" data-post-action="disk-play-pause" title="Воспроизвести">
+          <span id="diskPlayerPlayIcon">${playPauseIconHtml(false, 14, 14)}</span>
         </button>
         <span class="disk-player-time" id="diskPlayerCur">0:00</span>
-        <div class="disk-player-seek" id="diskPlayerSeekBar" onclick="diskSeekBar(event)">
+        <div class="disk-player-seek" id="diskPlayerSeekBar" data-post-action="disk-seek-bar">
           <div class="disk-player-seek-fill" id="diskPlayerFill"></div>
           <div class="disk-player-seek-thumb" id="diskPlayerThumb"></div>
         </div>
         <span class="disk-player-time" id="diskPlayerDur">–:––</span>
         <div class="disk-player-vol-wrap">
-          <button class="disk-player-vol-btn" id="diskPlayerVol" onclick="diskToggleMute()" title="Звук">
-            <svg id="diskPlayerVolIcon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+          <button class="disk-player-vol-btn" id="diskPlayerVol" data-post-action="disk-toggle-mute" title="Звук">
+            <span id="diskPlayerVolIcon">${iconCut('notifications', 'ui-icon', 15, 15)}</span>
           </button>
-          <input class="disk-player-vol-slider" id="diskPlayerVolSlider" type="range" min="0" max="1" step="0.02" value="1" oninput="diskSetVolume(this.value)" title="Громкость">
+          <input class="disk-player-vol-slider" id="diskPlayerVolSlider" type="range" min="0" max="1" step="0.02" value="1" data-post-action="disk-set-volume" title="Громкость">
         </div>
       </div>
     </div>`;
@@ -5184,7 +6611,7 @@ function _renderDiskPreview(f) {
   } else if ((f.mime || '').includes('pdf')) {
     mediaHtml = `<iframe class="disk-preview-pdf" src="${esc(f.path)}"></iframe>`;
   } else {
-    mediaHtml = `<div class="disk-preview-fallback"><div style="font-size:3rem">📄</div><div>Предпросмотр недоступен</div></div>`;
+    mediaHtml = `<div class="disk-preview-fallback"><div class="disk-preview-fallback-ic">${iconCut('file', 'ui-icon', 40, 40)}</div><div>Предпросмотр недоступен</div></div>`;
   }
 
   content.innerHTML = mediaHtml;
@@ -5195,18 +6622,18 @@ function _renderDiskPreview(f) {
     <div class="disk-preview-name-row">
       <span class="disk-preview-name">${esc(f.name)}</span>
       ${pos}
-      ${canEdit ? `<button class="disk-preview-edit-btn" onclick="openDiskEdit('${esc(f.id)}')" title="Переименовать">✎</button>` : ''}
+      ${canEdit ? `<button class="disk-preview-edit-btn" data-post-action="disk-open-edit" data-file-id="${esc(f.id)}" title="Переименовать">${iconCut('edit', 'ui-icon', 16, 16)}</button>` : ''}
     </div>
     ${f.description ? `<div class="disk-preview-desc">${esc(f.description)}</div>` : ''}
     <div class="disk-preview-info">${fmtBytes(f.size)} · ${timeAgo(f.created_at)}</div>
     ${f.public_token ? `<div class="disk-public-row">
       <span class="disk-public-label">Публичная:</span>
-      <input class="disk-public-input" readonly value="${esc(location.origin+'/pub/'+f.public_token)}" onclick="this.select();navigator.clipboard.writeText(this.value).then(()=>toast.success('Скопировано'))">
+      <input class="disk-public-input" readonly value="${esc(location.origin+'/pub/'+f.public_token)}" data-post-action="disk-copy-public-link">
     </div>` : ''}
     <div class="disk-preview-actions">
-      <a class="btn btn-sm" href="${esc(f.path)}" download="${esc(f.name)}">↓ Скачать</a>
-      ${canEdit ? `<button class="btn btn-sm" onclick="toggleDiskPublicLink('${esc(f.id)}')">${f.public_token ? '⊠ Закрыть' : '⊡ Открыть доступ'}</button>` : ''}
-      ${canEdit ? `<button class="btn btn-sm btn-danger" onclick="deleteDiskFile('${esc(f.id)}',true)">✕ Удалить</button>` : ''}
+      <a class="btn btn-sm btn-ic-row" href="${esc(f.path)}" download="${esc(f.name)}">${iconCut('download', 'ui-icon', 14, 14)}Скачать</a>
+      ${canEdit ? `<button class="btn btn-sm btn-ic-row" data-post-action="disk-toggle-public-link" data-file-id="${esc(f.id)}">${f.public_token ? `${iconCut('lock', 'ui-icon', 13, 13)}Закрыть` : `${iconCut('share', 'ui-icon', 13, 13)}Открыть доступ`}</button>` : ''}
+      ${canEdit ? `<button class="btn btn-sm btn-danger" data-post-action="disk-delete-file-preview" data-file-id="${esc(f.id)}">${iconCut('trash', 'ui-icon', 15, 15)} Удалить</button>` : ''}
     </div>`;
 
   if (postRender) setTimeout(postRender, 20);
@@ -5310,16 +6737,16 @@ async function initDiskPlayer(audioPath, wfId, fileSize) {
   });
   audio.addEventListener('play', () => {
     const icon = document.getElementById('diskPlayerPlayIcon');
-    if (icon) icon.innerHTML = '<rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/>';
+    if (icon) icon.innerHTML = playPauseIconHtml(true, 14, 14);
     _diskPlayerRaf = requestAnimationFrame(_diskPlayerTick);
   });
   audio.addEventListener('pause', () => {
     const icon = document.getElementById('diskPlayerPlayIcon');
-    if (icon) icon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+    if (icon) icon.innerHTML = playPauseIconHtml(false, 14, 14);
   });
   audio.addEventListener('ended', () => {
     const icon = document.getElementById('diskPlayerPlayIcon');
-    if (icon) icon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+    if (icon) icon.innerHTML = playPauseIconHtml(false, 14, 14);
     _diskPlayerTick();
   });
 
@@ -5384,9 +6811,7 @@ function diskToggleMute() {
   const slider = document.getElementById('diskPlayerVolSlider');
   if (!audio) return;
   audio.muted = !audio.muted;
-  if (icon) icon.innerHTML = audio.muted
-    ? '<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>'
-    : '<path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>';
+  if (icon) icon.innerHTML = audio.muted ? iconCut('mute', 'ui-icon', 15, 15) : iconCut('notifications', 'ui-icon', 15, 15);
   if (slider) slider.value = audio.muted ? 0 : audio.volume;
 }
 
@@ -5397,9 +6822,8 @@ function diskSetVolume(val) {
   audio.volume = val;
   audio.muted = val == 0;
   if (icon) {
-    if (val == 0) icon.innerHTML = '<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>';
-    else if (val < 0.5) icon.innerHTML = '<path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"/>';
-    else icon.innerHTML = '<path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>';
+    if (val == 0) icon.innerHTML = iconCut('mute', 'ui-icon', 15, 15);
+    else icon.innerHTML = iconCut('notifications', 'ui-icon', 15, 15);
   }
 }
 
@@ -5439,8 +6863,8 @@ async function openDiskEdit(id) {
       <label class="disk-edit-label">Папка</label>
       <select id="diskEditFolder" class="input">${folderOptions}</select>
       <div class="disk-preview-actions">
-        <button class="btn btn-sm" onclick="saveDiskEdit('${esc(id)}')">Сохранить</button>
-        <button class="btn btn-sm" onclick="_renderDiskPreview(_diskFiltered[diskPreviewIdx])">Отмена</button>
+        <button class="btn btn-sm" data-post-action="disk-save-edit" data-file-id="${esc(id)}">Сохранить</button>
+        <button class="btn btn-sm" data-post-action="disk-cancel-edit">Отмена</button>
       </div>
     </div>`;
   document.getElementById('diskEditName')?.focus();
@@ -5555,61 +6979,68 @@ async function renderDisk(app) {
   diskSelectMode = false;
   diskSelectedIds.clear();
   app.innerHTML = `
+    ${opiumCommandStrip('disk')}
+    ${opiumMetricCards([
+      { label: 'mode', value: diskView, note: 'grid/list' },
+      { label: 'select', value: 'bulk', note: 'zip or delete' },
+      { label: 'share', value: 'links', note: 'publish files' },
+    ])}
     <div class="disk-header">
       <h2 class="disk-title">Диск</h2>
       <div class="disk-header-right">
-        <button class="btn btn-sm" onclick="createDiskFolder()">+ Папка</button>
-        <button class="btn btn-sm" onclick="document.getElementById('diskFileInput').click()">↑ Загрузить</button>
-        <button class="disk-view-btn" id="diskSelectBtn" onclick="toggleDiskSelectMode()" title="Выбрать">⊙</button>
-        <button class="disk-view-btn${diskView==='grid'?' active':''}" id="diskBtnGrid" onclick="setDiskView('grid')" title="Сетка">⊞</button>
-        <button class="disk-view-btn${diskView==='list'?' active':''}" id="diskBtnList" onclick="setDiskView('list')" title="Список">☰</button>
+        <button class="btn btn-sm btn-ic-row" data-post-action="disk-create-folder">${iconCut('add', 'ui-icon', 14, 14)}Папка</button>
+        <button class="btn btn-sm btn-ic-row" data-post-action="disk-open-upload">${iconCut('upload', 'ui-icon', 14, 14)}Загрузить</button>
+        <button class="disk-view-btn" id="diskSelectBtn" data-post-action="disk-toggle-select-mode" title="Выбрать">${iconCut('check', 'ui-icon', 15, 15)}</button>
+        <button class="disk-view-btn${diskView==='grid'?' active':''}" id="diskBtnGrid" data-post-action="disk-set-view" data-view="grid" title="Сетка">${iconCut('gallery', 'ui-icon', 15, 15)}</button>
+        <button class="disk-view-btn${diskView==='list'?' active':''}" id="diskBtnList" data-post-action="disk-set-view" data-view="list" title="Список">${iconCut('more-horizontal', 'ui-icon', 15, 15)}</button>
       </div>
     </div>
     <div id="diskBreadcrumb" class="disk-breadcrumb"></div>
     <input type="file" id="diskFileInput" style="display:none" multiple
       accept="audio/*,video/*,image/*,.pdf,.txt,.md,.json,.zip,.rar,.7z"
-      onchange="uploadDiskFiles(this.files)">
+      data-post-action="disk-file-input">
     <div class="disk-dropzone" id="diskDropzone">
-      <span class="disk-drop-hint">↑ Перетащи файлы или нажми для загрузки</span>
+      <span class="disk-drop-hint disk-drop-hint--ic">${iconCut('upload', 'ui-icon', 15, 15)}Перетащи файлы или нажми для загрузки</span>
       <div id="diskStats" class="disk-stat-text"></div>
     </div>
     <div class="disk-toolbar">
       <div class="disk-search-wrap">
-        <input class="disk-search" id="diskSearchInput" placeholder="Поиск по имени..." oninput="setDiskSearch(this.value)" value="${esc(diskSearch)}">
+        <input class="disk-search" id="diskSearchInput" placeholder="Поиск по имени..." data-post-action="disk-search-input" value="${esc(diskSearch)}">
       </div>
-      <button class="btn btn-sm btn-ghost" onclick="diskCreateFolderPrompt()" title="Создать папку">+ ПАПКА</button>
+      <button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="disk-create-folder-prompt" title="Создать папку">${iconCut('add', 'ui-icon', 15, 15)} ПАПКА</button>
       <div class="disk-sort-tabs">
-        <span class="disk-sort-btn${diskSort==='date'?' active':''}" data-sort="date" onclick="setDiskSort('date')">Дата${diskSort==='date'?(diskSortDir==='asc'?' ↑':' ↓'):''}</span>
-        <span class="disk-sort-btn${diskSort==='name'?' active':''}" data-sort="name" onclick="setDiskSort('name')">Имя${diskSort==='name'?(diskSortDir==='asc'?' ↑':' ↓'):''}</span>
-        <span class="disk-sort-btn${diskSort==='size'?' active':''}" data-sort="size" onclick="setDiskSort('size')">Размер${diskSort==='size'?(diskSortDir==='asc'?' ↑':' ↓'):''}</span>
+        <span class="disk-sort-btn${diskSort==='date'?' active':''}" data-sort="date" data-post-action="disk-set-sort" data-sort-key="date">Дата</span>
+        <span class="disk-sort-btn${diskSort==='name'?' active':''}" data-sort="name" data-post-action="disk-set-sort" data-sort-key="name">Имя</span>
+        <span class="disk-sort-btn${diskSort==='size'?' active':''}" data-sort="size" data-post-action="disk-set-sort" data-sort-key="size">Размер</span>
       </div>
     </div>
     <div class="disk-filters">
-      <span class="disk-filter-tab${diskActiveFilter==='all'?' active':''}" data-filter="all" onclick="setDiskFilter('all')">Все</span>
-      <span class="disk-filter-tab${diskActiveFilter==='image'?' active':''}" data-filter="image" onclick="setDiskFilter('image')">Фото</span>
-      <span class="disk-filter-tab${diskActiveFilter==='audio'?' active':''}" data-filter="audio" onclick="setDiskFilter('audio')">Аудио</span>
-      <span class="disk-filter-tab${diskActiveFilter==='video'?' active':''}" data-filter="video" onclick="setDiskFilter('video')">Видео</span>
-      <span class="disk-filter-tab${diskActiveFilter==='other'?' active':''}" data-filter="other" onclick="setDiskFilter('other')">Файлы</span>
+      <span class="disk-filter-tab${diskActiveFilter==='all'?' active':''}" data-filter="all" data-post-action="disk-set-filter" data-filter-key="all">Все</span>
+      <span class="disk-filter-tab${diskActiveFilter==='image'?' active':''}" data-filter="image" data-post-action="disk-set-filter" data-filter-key="image">Фото</span>
+      <span class="disk-filter-tab${diskActiveFilter==='audio'?' active':''}" data-filter="audio" data-post-action="disk-set-filter" data-filter-key="audio">Аудио</span>
+      <span class="disk-filter-tab${diskActiveFilter==='video'?' active':''}" data-filter="video" data-post-action="disk-set-filter" data-filter-key="video">Видео</span>
+      <span class="disk-filter-tab${diskActiveFilter==='other'?' active':''}" data-filter="other" data-post-action="disk-set-filter" data-filter-key="other">Файлы</span>
     </div>
     <div id="diskBulkBar" class="disk-bulk-bar hidden">
       <span class="bulk-count"></span>
-      <button class="btn btn-sm" onclick="downloadDiskZip()">↓ ZIP</button>
-      <button class="btn btn-sm btn-danger" onclick="bulkDeleteDisk()">✕ Удалить</button>
-      <button class="btn btn-sm" onclick="toggleDiskSelectMode()">Отмена</button>
+      <button class="btn btn-sm disk-bulk-zip" data-post-action="disk-download-zip">${iconCut('download', 'ui-icon', 15, 15)} ZIP</button>
+      <button class="btn btn-sm btn-danger disk-bulk-del" data-post-action="disk-bulk-delete">${iconCut('trash', 'ui-icon', 15, 15)} Удалить</button>
+      <button class="btn btn-sm btn-ic-row" data-post-action="disk-toggle-select-mode">${iconCut('close', 'ui-icon', 14, 14)}Отмена</button>
     </div>
     <div id="diskProgress" class="disk-prog-wrap hidden"></div>
     <div id="diskGrid"></div>
-    <div class="disk-overlay hidden" id="diskOverlay" onclick="closeDiskPreview(event)">
-      <button class="disk-nav-btn prev" onclick="event.stopPropagation();diskNavPreview(-1)">‹</button>
-      <div class="disk-preview-box" onclick="event.stopPropagation()">
-        <button class="disk-preview-close" onclick="closeDiskPreview()">✕</button>
+    <div class="disk-overlay hidden" id="diskOverlay" data-post-action="disk-overlay-close">
+      <button class="disk-nav-btn prev" data-post-action="disk-nav-preview" data-nav-dir="-1" aria-label="Назад">${iconCut('back', 'ui-icon', 18, 18)}</button>
+      <div class="disk-preview-box" data-post-action="disk-preview-box">
+        <button class="disk-preview-close" data-post-action="disk-close-preview" aria-label="Закрыть">${iconCut('close', 'ui-icon', 18, 18)}</button>
         <div id="diskPreviewContent"></div>
         <div id="diskPreviewMeta"></div>
       </div>
-      <button class="disk-nav-btn next" onclick="event.stopPropagation();diskNavPreview(1)">›</button>
+      <button class="disk-nav-btn next" data-post-action="disk-nav-preview" data-nav-dir="1" aria-label="Вперёд">${iconCut('forward', 'ui-icon', 18, 18)}</button>
     </div>`;
   renderDiskBreadcrumb();
   setupDiskDropzone();
+  updateDiskSortUI();
   loadDiskFiles();
 }
 
@@ -5619,7 +7050,7 @@ function reactionBarHtml(mid, reactions) {
   const pills = (reactions || []).map(r =>
     `<span class="reaction-pill${r.me ? ' me' : ''}" data-mid="${esc(String(mid))}" data-emoji="${esc(r.emoji)}" role="button" tabindex="0" title="${r.count}">${r.emoji}<span class="pill-count">${r.count}</span></span>`
   ).join('');
-  return `${pills}<button class="reaction-add-btn" data-mid="${esc(String(mid))}" aria-label="Добавить реакцию">+</button>`;
+  return `${pills}<button class="reaction-add-btn" data-mid="${esc(String(mid))}" aria-label="Добавить реакцию">${iconCut('add', 'ui-icon', 14, 14)}</button>`;
 }
 
 function getOrCreatePicker() {
@@ -5811,10 +7242,12 @@ async function openMediaGallery(cid) {
     <div class="modal-head">
       <b>Медиа и файлы</b>
       <div class="modal-head-actions">
-        <button type="button" class="gallery-tab active" data-tab="images" onclick="switchGalleryTab(this,'images','${cid}')">Фото</button>
-        <button type="button" class="gallery-tab" data-tab="audio" onclick="switchGalleryTab(this,'audio','${cid}')">Аудио</button>
-        <button type="button" class="gallery-tab" data-tab="files" onclick="switchGalleryTab(this,'files','${cid}')">Файлы</button>
-        <button type="button" class="modal-icon-dismiss" onclick="this.closest('.modal-overlay').remove()" aria-label="Закрыть">✕</button>
+        <button type="button" class="gallery-tab active" data-tab="images" data-post-action="switch-gallery-tab" data-gallery-tab="images" data-conv-id="${cid}">Фото</button>
+        <button type="button" class="gallery-tab" data-tab="videos" data-post-action="switch-gallery-tab" data-gallery-tab="videos" data-conv-id="${cid}">Видео</button>
+        <button type="button" class="gallery-tab" data-tab="audio" data-post-action="switch-gallery-tab" data-gallery-tab="audio" data-conv-id="${cid}">Аудио</button>
+        <button type="button" class="gallery-tab" data-tab="files" data-post-action="switch-gallery-tab" data-gallery-tab="files" data-conv-id="${cid}">Файлы</button>
+        <button type="button" class="gallery-tab" data-tab="links" data-post-action="switch-gallery-tab" data-gallery-tab="links" data-conv-id="${cid}">Ссылки</button>
+        <button type="button" class="modal-icon-dismiss" data-post-action="close-modal-overlay" aria-label="Закрыть">${iconCut('close', 'ui-icon', 18, 18)}</button>
       </div>
     </div>
     <div id="galleryContent" class="gallery-body"></div>
@@ -5831,23 +7264,45 @@ async function loadGalleryTab(tab, cid) {
     const items = await api(`/chats/${cid}/media`);
     const filtered = items.filter(m => {
       if (tab === 'images') return m.file_type && m.file_type.startsWith('image/');
+      if (tab === 'videos') return m.file_type && m.file_type.startsWith('video/');
       if (tab === 'audio') return m.file_type && m.file_type.startsWith('audio/');
-      if (tab === 'files') return m.file_type && !m.file_type.startsWith('image/') && !m.file_type.startsWith('audio/');
+      if (tab === 'links') return !m.file && /https?:\/\/[^\s<>"']+/.test(m.content || '');
+      if (tab === 'files') return m.file_type && !m.file_type.startsWith('image/') && !m.file_type.startsWith('audio/') && !m.file_type.startsWith('video/');
       return true;
     });
     if (!filtered.length) { el.innerHTML = '<div class="gallery-state-msg">Ничего нет</div>'; return; }
     if (tab === 'images') {
       el.innerHTML = `<div class="gallery-grid">
-        ${filtered.map(m => `<img class="gallery-thumb" src="${esc(m.file)}" alt="" onclick="openImg('${esc(m.file)}')" loading="lazy">`).join('')}
+        ${filtered.map(m => `<img class="gallery-thumb" src="${esc(m.file)}" alt="" data-post-action="open-image" data-image="${esc(m.file)}" loading="lazy">`).join('')}
+      </div>`;
+    } else if (tab === 'videos') {
+      el.innerHTML = `<div class="gallery-grid gallery-grid--videos">
+        ${filtered.map(m => `<button type="button" class="gallery-video-thumb" data-post-action="open-video" data-video="${esc(m.file)}">
+          <video src="${esc(m.file)}" preload="metadata" muted playsinline></video>
+          <span>${iconCut('play', 'ui-icon', 18, 18)}</span>
+        </button>`).join('')}
       </div>`;
     } else if (tab === 'audio') {
       el.innerHTML = filtered.map(m => `<div class="gallery-audio-row">${voicePlayerHtml(m.file, m.id, m.file_name)}<div class="gallery-audio-meta">${timeAgo(m.created_at)} · ${esc(m.display_name)}</div></div>`).join('');
+    } else if (tab === 'links') {
+      el.innerHTML = filtered.map(m => {
+        const url = (m.content || '').match(/https?:\/\/[^\s<>"']+/)?.[0] || '';
+        let host = url;
+        try { host = new URL(url).hostname; } catch {}
+        return `<div class="gallery-file-row gallery-link-row" data-post-action="jump-to-message" data-msg-id="${esc(m.id)}" data-conv-id="${esc(cid)}">
+          <span class="gallery-file-icon" aria-hidden="true">${iconCut('forward', 'ui-icon', 18, 18)}</span>
+          <div class="gallery-file-main">
+            <a class="gallery-file-name" href="${esc(url)}" target="_blank" rel="noopener" data-post-action="">${esc(host)}</a>
+            <div class="gallery-file-meta">${esc(url)} · ${timeAgo(m.created_at)} · ${esc(m.display_name)}</div>
+          </div>
+        </div>`;
+      }).join('');
     } else {
       el.innerHTML = filtered.map(m => `<div class="gallery-file-row">
-        <span class="gallery-file-icon" aria-hidden="true">📄</span>
+        <span class="gallery-file-icon" aria-hidden="true">${iconCut('file', 'ui-icon', 18, 18)}</span>
         <div class="gallery-file-main">
           <div class="gallery-file-name"><a href="${esc(m.file)}" download="${esc(m.file_name||'file')}">${esc(m.file_name||'файл')}</a></div>
-          <div class="gallery-file-meta">${timeAgo(m.created_at)} · ${esc(m.display_name)}</div>
+          <div class="gallery-file-meta">${esc(m.file_type||'file')} · ${m.file_size ? fmtBytes(m.file_size) + ' · ' : ''}${timeAgo(m.created_at)} · ${esc(m.display_name)}</div>
         </div>
       </div>`).join('');
     }
@@ -5949,7 +7404,7 @@ async function editGroupInfo(cid) {
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.innerHTML = `<div class="modal">
-    <div class="modal-head"><b>Редактировать группу</b><button type="button" class="modal-icon-dismiss" onclick="this.closest('.modal-overlay').remove()" aria-label="Закрыть">✕</button></div>
+    <div class="modal-head"><b>Редактировать группу</b><button type="button" class="modal-icon-dismiss" data-post-action="close-modal-overlay" aria-label="Закрыть">${iconCut('close', 'ui-icon', 18, 18)}</button></div>
     <div class="modal-form-stack">
       <div>
         <label class="modal-field-label" for="editGroupTitle">Название</label>
@@ -5959,7 +7414,7 @@ async function editGroupInfo(cid) {
         <label class="modal-field-label" for="editGroupAvatar">Аватар группы</label>
         <input type="file" id="editGroupAvatar" accept="image/*" class="modal-file-input">
       </div>
-      <button type="button" class="btn" onclick="saveGroupInfo('${cid}',this.closest('.modal-overlay'))">Сохранить</button>
+      <button type="button" class="btn" data-post-action="save-group-info" data-conv-id="${cid}">Сохранить</button>
     </div>
   </div>`;
   document.body.appendChild(modal);
@@ -6017,7 +7472,7 @@ async function openUserInfoPanel(username) {
   panel.innerHTML = `
     <div class="user-info-head">
       <b>Профиль</b>
-      <button type="button" class="modal-icon-dismiss" onclick="closeUserInfoPanel()" aria-label="Закрыть">✕</button>
+      <button type="button" class="modal-icon-dismiss" data-post-action="close-user-info-panel" aria-label="Закрыть">${iconCut('close', 'ui-icon', 18, 18)}</button>
     </div>
     <div class="user-info-center">
       ${avatarEl(user.avatar, 'avatar', initial(user.display_name))}
@@ -6030,9 +7485,9 @@ async function openUserInfoPanel(username) {
       <div class="user-info-stat"><div class="user-info-stat-val">${user.following||0}</div>подписки</div>
     </div>
     <div class="user-info-actions">
-      <button type="button" class="btn" onclick="go('profile','${esc(user.username)}');closeUserInfoPanel()">Открыть профиль</button>
-      ${!user.is_following ? `<button type="button" class="btn btn-ghost" onclick="followUser('${user.id}',this)">Подписаться</button>` : ''}
-      <button type="button" class="btn btn-ghost btn-danger" onclick="blockUserFromPanel('${esc(user.username)}')">Заблокировать</button>
+      <button type="button" class="btn" data-post-action="open-profile-from-panel" data-username="${esc(user.username)}">Открыть профиль</button>
+      ${!user.is_following ? `<button type="button" class="btn btn-ghost" data-post-action="follow-user-from-panel" data-user-id="${user.id}">Подписаться</button>` : ''}
+      <button type="button" class="btn btn-ghost btn-danger" data-post-action="block-user-from-panel" data-username="${esc(user.username)}">Заблокировать</button>
     </div>
   `;
   document.body.appendChild(panel);

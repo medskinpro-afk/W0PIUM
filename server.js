@@ -1,4 +1,5 @@
-require('dotenv').config();
+const p = require('path');
+require('dotenv').config({ path: p.join(__dirname, '.env') });
 
 const express = require('express');
 const crypto = require('crypto');
@@ -10,7 +11,6 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
-const p = require('path');
 const fs = require('fs');
 const pino = require('pino');
 const pinoHttp = require('pino-http');
@@ -20,6 +20,8 @@ const sharp = require('sharp');
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const IS_PROD = process.env.NODE_ENV === 'production';
+const RECENT_ERRORS = [];
+const MAX_RECENT_ERRORS = 40;
 
 // ── STARTUP SECRETS CHECK ──
 // Fail immediately in production if critical secrets are missing.
@@ -97,6 +99,7 @@ const limiterPasswordChange = _rl({ windowMs: 300_000, limit: 5, keyGenerator: r
 const limiterSessionManage = _rl({ windowMs: 60_000, limit: 30, keyGenerator: req => req.uid || req.ip });
 const limiterAccountDelete = _rl({ windowMs: 3_600_000, limit: 2, keyGenerator: req => req.uid || req.ip, message: 'Подожди немного перед повтором' });
 const limiterAvatarUpload = _rl({ windowMs: 60_000, limit: 10, keyGenerator: req => req.uid || req.ip, message: 'Слишком много загрузок аватара' });
+const limiterAdminJobTest = _rl({ windowMs: 60_000, limit: 30, keyGenerator: req => req.uid || req.ip });
 
 const PORT = process.env.PORT || 3000;
 const DATA = process.env.DATA_DIR || './data';
@@ -105,8 +108,9 @@ const IMG_DIR  = p.join(DATA, 'images');
 const FILE_DIR = p.join(DATA, 'files');
 const MSG_DIR  = p.join(DATA, 'msg_images');
 const DISK_DIR = p.join(DATA, 'disk');
+const DISK_PREV_DIR = p.join(DISK_DIR, 'previews');
 const DB_PATH  = p.join(DATA, 'w0pium.db');
-[AVA_DIR, IMG_DIR, MSG_DIR, FILE_DIR, DISK_DIR].forEach(d => fs.mkdirSync(d, { recursive: true }));
+[AVA_DIR, IMG_DIR, MSG_DIR, FILE_DIR, DISK_DIR, DISK_PREV_DIR].forEach(d => fs.mkdirSync(d, { recursive: true }));
 
 const INVITE_ONLY = process.env.INVITE_ONLY === '1';
 const MASTER_CODE = (process.env.MASTER_CODE || 'W0PIUM').toUpperCase();
@@ -212,12 +216,19 @@ function main() {
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
   db.exec(`CREATE TABLE IF NOT EXISTS message_reactions (
-    msg_id TEXT NOT NULL, user_id TEXT NOT NULL, emoji TEXT NOT NULL,
-    created_at DATETIME DEFAULT (datetime('now')),
-    PRIMARY KEY (msg_id, user_id),
-    FOREIGN KEY (msg_id) REFERENCES messages(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )`);
+  msg_id TEXT NOT NULL, user_id TEXT NOT NULL, emoji TEXT NOT NULL,
+  created_at DATETIME DEFAULT (datetime('now')),
+  PRIMARY KEY (msg_id, user_id),
+  FOREIGN KEY (msg_id) REFERENCES messages(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
+  db.exec(`CREATE TABLE IF NOT EXISTS saved_messages (
+  user_id TEXT NOT NULL, msg_id TEXT NOT NULL,
+  created_at DATETIME DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, msg_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (msg_id) REFERENCES messages(id) ON DELETE CASCADE
+)`);
   db.exec(`CREATE TABLE IF NOT EXISTS drops (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
     content TEXT DEFAULT '', track_url TEXT DEFAULT '', image TEXT DEFAULT '',
@@ -368,9 +379,14 @@ function main() {
     "ALTER TABLE messages ADD COLUMN forwarded_from TEXT DEFAULT NULL",
     "ALTER TABLE conversations ADD COLUMN pinned_msg_id TEXT DEFAULT NULL",
     "ALTER TABLE conversation_members ADD COLUMN muted_until DATETIME DEFAULT NULL",
+    "ALTER TABLE conversation_members ADD COLUMN pinned_at DATETIME DEFAULT NULL",
+    "ALTER TABLE conversation_members ADD COLUMN archived_at DATETIME DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN last_seen DATETIME DEFAULT NULL",
     "ALTER TABLE conversations ADD COLUMN avatar TEXT DEFAULT ''",
+    "CREATE TABLE IF NOT EXISTS background_jobs (id TEXT PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', payload TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 5, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), run_after TEXT DEFAULT (datetime('now')))",
+    "ALTER TABLE disk_files ADD COLUMN preview_path TEXT DEFAULT ''",
   ].forEach(s => { try { db.exec(s); } catch {} });
+  try { run(`UPDATE background_jobs SET status='pending', updated_at=datetime('now') WHERE status='running'`); } catch {}
   // FTS5 for full-text post search
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(content, post_id UNINDEXED, tokenize='unicode61')`);
   db.exec(`CREATE TRIGGER IF NOT EXISTS posts_fts_insert AFTER INSERT ON posts BEGIN
@@ -391,8 +407,13 @@ function main() {
   try { db.exec("UPDATE drops SET expires_at=datetime(created_at,'+24 hours') WHERE expires_at IS NULL"); } catch {}
   // Grandfather existing users — they registered before email verification was required
   try { db.exec("UPDATE users SET email_verified=1 WHERE email='' OR email IS NULL"); } catch {}
-  // Ensure WF has admin rights
-  try { db.exec("UPDATE users SET is_admin=1 WHERE username='WF'"); } catch {}
+  // Legacy bootstrap is disabled by default; enable only for one-off recovery.
+  if (process.env.BOOTSTRAP_ADMIN_USERNAME) {
+    try {
+      run("UPDATE users SET is_admin=1 WHERE username=?", [process.env.BOOTSTRAP_ADMIN_USERNAME]);
+      logger.warn(`bootstrap_admin: granted admin to ${process.env.BOOTSTRAP_ADMIN_USERNAME}`);
+    } catch {}
+  }
 
   // Performance indexes
   [
@@ -416,8 +437,7 @@ function main() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc:  ["'self'", "'unsafe-inline'"],
-        scriptSrcAttr: ["'unsafe-inline'"],
+        scriptSrc:  ["'self'"],
         styleSrc:   ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc:    ["'self'", "https://fonts.gstatic.com"],
         imgSrc:     ["'self'", "data:", "blob:"],
@@ -431,10 +451,17 @@ function main() {
   }));
   app.use(compression());
   app.use(pinoHttp({ logger, autoLogging: { ignore: req => req.url === '/api/events' } }));
+  app.use((req, res, next) => {
+    const reqId = req.headers['x-request-id'] || crypto.randomUUID();
+    req.id = String(reqId);
+    res.setHeader('x-request-id', req.id);
+    next();
+  });
   app.use(express.json());
   app.use(cookieParser());
   app.use(csrfCheck);
   app.use(express.static(p.join(__dirname, 'public')));
+  app.use('/icons_cut', express.static(p.join(__dirname, 'icons_cut')));
   app.use('/avatars',    express.static(AVA_DIR));
   app.use('/images',     express.static(IMG_DIR));
   app.get('/msg_images/:file', auth, limiterFiles, (req, res) => {
@@ -555,6 +582,8 @@ function main() {
     const ids = msgs.map(m => m.id);
     const ph = ids.map(() => '?').join(',');
     const rows = all(`SELECT emoji, user_id, msg_id FROM message_reactions WHERE msg_id IN (${ph})`, ids);
+    const savedRows = uid ? all(`SELECT msg_id FROM saved_messages WHERE user_id=? AND msg_id IN (${ph})`, [uid, ...ids]) : [];
+    const savedSet = new Set(savedRows.map(r => r.msg_id));
     const byMsg = {};
     rows.forEach(r => {
       if (!byMsg[r.msg_id]) byMsg[r.msg_id] = {};
@@ -564,15 +593,19 @@ function main() {
     });
     return msgs.map(m => ({
       ...m,
+      saved: savedSet.has(m.id),
       reactions: Object.values(byMsg[m.id] || {})
         .map(r => ({ ...r, me: uid ? r.users.includes(uid) : false }))
     }));
   }
 
   function cleanUserFiles(uid) {
-    // Disk files
-    all('SELECT path FROM disk_files WHERE user_id=?', [uid])
-      .forEach(f => { try { fs.unlinkSync(p.join(DATA, f.path.replace(/^\//, ''))); } catch {} });
+    // Disk files (+ async-generated previews)
+    all('SELECT path, preview_path FROM disk_files WHERE user_id=?', [uid])
+      .forEach(f => {
+        try { if (f.path) fs.unlinkSync(p.join(DATA, f.path.replace(/^\//, ''))); } catch {}
+        try { if (f.preview_path) fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch {}
+      });
     // Avatar
     const u = get('SELECT avatar FROM users WHERE id=?', [uid]);
     if (u?.avatar) try { fs.unlinkSync(p.join(DATA, u.avatar.replace(/^\//, ''))); } catch {}
@@ -598,6 +631,86 @@ function main() {
     await s.webp({ quality: 82 }).toFile(outPath);
     fs.unlinkSync(srcPath);
     return outName;
+  }
+
+  function _pathUnderDir(absPath, rootAbs) {
+    const norm = p.resolve(absPath);
+    const root = p.resolve(rootAbs);
+    return norm === root || norm.startsWith(root + p.sep);
+  }
+
+  function enqueueBackgroundJob(type, payloadObj, maxAttempts = 5) {
+    const id = uuidv4();
+    const payload = JSON.stringify(payloadObj && typeof payloadObj === 'object' ? payloadObj : {});
+    run(`INSERT INTO background_jobs (id,type,status,payload,max_attempts) VALUES(?,?,?,?,?)`, [id, type, 'pending', payload, maxAttempts]);
+    return id;
+  }
+
+  async function executeBackgroundJob(job) {
+    let payload = {};
+    try { payload = JSON.parse(job.payload || '{}'); } catch { payload = {}; }
+    if (job.type === 'noop') return { ok: true };
+    if (job.type === 'image_webp') {
+      const { srcPath, destKey, opts } = payload;
+      const dirMap = { images: IMG_DIR, avatars: AVA_DIR, msg_images: MSG_DIR };
+      const destDir = dirMap[destKey];
+      if (!destDir) throw new Error('invalid destKey');
+      const resolvedSrc = p.resolve(srcPath);
+      if (!_pathUnderDir(resolvedSrc, DATA)) throw new Error('invalid src path');
+      if (!fs.existsSync(resolvedSrc)) throw new Error('src missing');
+      const nm = await processImage(resolvedSrc, destDir, opts || {});
+      return { outName: nm };
+    }
+    if (job.type === 'disk_image_preview') {
+      const diskFileId = payload.disk_file_id;
+      if (!diskFileId) throw new Error('missing disk_file_id');
+      const df = get('SELECT path, mime FROM disk_files WHERE id=?', [diskFileId]);
+      if (!df) return { skipped: true, reason: 'file_deleted' };
+      const mime = (df.mime || '').toLowerCase();
+      if (!mime.startsWith('image/')) return { skipped: true, reason: 'not_image' };
+      const absSrc = p.resolve(p.join(DATA, df.path.replace(/^\/disk\//, 'disk/')));
+      if (!_pathUnderDir(absSrc, DISK_DIR)) throw new Error('bad disk path');
+      if (!fs.existsSync(absSrc)) throw new Error('source missing');
+      fs.mkdirSync(DISK_PREV_DIR, { recursive: true });
+      const outName = diskFileId + '.webp';
+      const outAbs = p.join(DISK_PREV_DIR, outName);
+      await sharp(absSrc).resize({ width: 320, withoutEnlargement: true }).webp({ quality: 78 }).toFile(outAbs);
+      const previewRel = '/disk/previews/' + outName;
+      run('UPDATE disk_files SET preview_path=? WHERE id=?', [previewRel, diskFileId]);
+      return { preview_path: previewRel };
+    }
+    throw new Error('unknown job type');
+  }
+
+  let bgWorkerBusy = false;
+  async function backgroundWorkerTick() {
+    if (bgWorkerBusy) return;
+    bgWorkerBusy = true;
+    try {
+      const pick = get(`SELECT id FROM background_jobs WHERE status='pending' AND datetime(run_after) <= datetime('now') ORDER BY created_at ASC LIMIT 1`);
+      if (!pick) return;
+      const info = db.prepare(`UPDATE background_jobs SET status='running', attempts=attempts+1, updated_at=datetime('now') WHERE id=? AND status='pending'`).run(pick.id);
+      if (info.changes !== 1) return;
+      const job = get(`SELECT * FROM background_jobs WHERE id=?`, [pick.id]);
+      if (!job) return;
+      try {
+        const result = await executeBackgroundJob(job);
+        run(`UPDATE background_jobs SET status='done', result=?, error='', updated_at=datetime('now') WHERE id=?`, [JSON.stringify(result), job.id]);
+      } catch (e) {
+        const attempts = job.attempts;
+        const maxA = job.max_attempts || 5;
+        const errMsg = String(e && e.message ? e.message : e);
+        if (attempts >= maxA) {
+          run(`UPDATE background_jobs SET status='failed', error=?, updated_at=datetime('now') WHERE id=?`, [errMsg, job.id]);
+        } else {
+          const delaySec = Math.min(300, 5 * attempts * attempts);
+          run(`UPDATE background_jobs SET status='pending', error=?, run_after=datetime('now', ?), updated_at=datetime('now') WHERE id=?`, [errMsg, `+${delaySec} seconds`, job.id]);
+        }
+        logger.error({ err: e, jobId: job.id, jobType: job.type }, 'background job failed');
+      }
+    } finally {
+      bgWorkerBusy = false;
+    }
   }
 
   async function sendEmail(to, subject, html) {
@@ -1281,9 +1394,9 @@ function main() {
   app.get('/api/search', auth, (req, res) => {
     const q = (req.query.q || '').trim();
     const type = req.query.type || 'all';
-    if (!q || q.length < 2) return res.json({ users:[], posts:[], messages:[] });
+    if (!q || q.length < 2) return res.json({ users:[], posts:[], messages:[], files:[] });
     const like = `%${q}%`;
-    const result = { users:[], posts:[], messages:[] };
+    const result = { users:[], posts:[], messages:[], files:[] };
     if (type === 'all' || type === 'users') {
       // exclude blocked/blocking users
       result.users = all(`
@@ -1309,6 +1422,29 @@ function main() {
         ORDER BY p.created_at DESC LIMIT 20
       `, [q + '*', req.uid, req.uid, req.uid, req.uid]);
       result.posts = enrich(raw, req.uid);
+    }
+    if (type === 'all' || type === 'messages') {
+      result.messages = all(`
+        SELECT m.id, m.conv_id, m.content, m.created_at, m.sender_id,
+               u.display_name, u.avatar,
+               c.is_group, c.title,
+               (SELECT display_name FROM users u2 JOIN conversation_members cm2 ON cm2.user_id=u2.id WHERE cm2.conv_id=c.id AND cm2.user_id!=? LIMIT 1) AS other_name
+        FROM messages m
+        JOIN users u ON u.id=m.sender_id
+        JOIN conversations c ON c.id=m.conv_id
+        JOIN conversation_members cm ON cm.conv_id=m.conv_id AND cm.user_id=?
+        WHERE m.content LIKE ? AND m.deleted_at IS NULL
+        ORDER BY m.created_at DESC LIMIT 12
+      `, [req.uid, req.uid, like]);
+    }
+    if (type === 'all' || type === 'files') {
+      result.files = all(`
+        SELECT id,name,mime,size,description,path,created_at,public_token
+        FROM disk_files
+        WHERE user_id=? AND (name LIKE ? OR IFNULL(description,'') LIKE ?)
+        ORDER BY created_at DESC
+        LIMIT 12
+      `, [req.uid, like, like]);
     }
     res.json(result);
   });
@@ -1594,11 +1730,13 @@ function main() {
   });
 
   app.get('/api/chats', auth, (req, res) => {
-    const convs=all(`SELECT c.id,c.is_group,c.title,c.owner,c.pinned_msg_id,c.avatar FROM conversations c JOIN conversation_members cm ON cm.conv_id=c.id WHERE cm.user_id=? ORDER BY (SELECT created_at FROM messages m WHERE m.conv_id=c.id ORDER BY m.created_at DESC LIMIT 1) DESC NULLS LAST, c.created_at DESC`,[req.uid]);
+    const includeArchived = req.query.archived === '1';
+    const archiveWhere = includeArchived ? 'cm.archived_at IS NOT NULL' : 'cm.archived_at IS NULL';
+    const convs=all(`SELECT c.id,c.is_group,c.title,c.owner,c.pinned_msg_id,c.avatar,cm.pinned_at,cm.archived_at FROM conversations c JOIN conversation_members cm ON cm.conv_id=c.id WHERE cm.user_id=? AND ${archiveWhere} ORDER BY cm.pinned_at IS NULL, datetime(cm.pinned_at) DESC, (SELECT created_at FROM messages m WHERE m.conv_id=c.id ORDER BY m.created_at DESC LIMIT 1) DESC NULLS LAST, c.created_at DESC`,[req.uid]);
     const result=convs.map(c=>{
       const members=all(`SELECT u.id,u.username,u.display_name,u.avatar,u.last_seen FROM conversation_members cm JOIN users u ON cm.user_id=u.id WHERE cm.conv_id=?`,[c.id]);
       const last=get(`SELECT m.id,m.sender_id,m.content,m.file,m.file_type,m.edited_at,m.deleted_at,m.created_at,u.username,u.display_name FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.conv_id=? ORDER BY m.created_at DESC LIMIT 1`,[c.id]);
-      const lr=get('SELECT last_read,accepted,muted_until FROM conversation_members WHERE conv_id=? AND user_id=?',[c.id,req.uid]);
+      const lr=get('SELECT last_read,accepted,muted_until,pinned_at,archived_at FROM conversation_members WHERE conv_id=? AND user_id=?',[c.id,req.uid]);
       const unread=lr?get('SELECT COUNT(*) AS c FROM messages WHERE conv_id=? AND datetime(created_at)>datetime(?) AND deleted_at IS NULL',[c.id,lr.last_read]).c:0;
       const my_accepted=lr?!!lr.accepted:true;
       let other_last_seen = null;
@@ -1606,9 +1744,39 @@ function main() {
         const otherMember = members.find(m => m.id !== req.uid);
         if (otherMember) other_last_seen = otherMember.last_seen || null;
       }
-      return { id:c.id, is_group:!!c.is_group, title:c.title, members, last, unread, my_accepted, pinned_msg_id: c.pinned_msg_id || null, muted_until: lr?.muted_until || null, other_last_seen, avatar: c.avatar || '' };
+      return { id:c.id, is_group:!!c.is_group, title:c.title, members, last, unread, my_accepted, pinned_msg_id: c.pinned_msg_id || null, pinned_at: lr?.pinned_at || c.pinned_at || null, archived_at: lr?.archived_at || c.archived_at || null, muted_until: lr?.muted_until || null, other_last_seen, avatar: c.avatar || '' };
     });
     res.json(result);
+  });
+
+  app.patch('/api/chats/:cid/state', auth, (req, res) => {
+    const cid = req.params.cid;
+    if (!get('SELECT 1 FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]))
+      return res.status(403).json({ error:'forbidden' });
+    const body = req.body || {};
+    if (Object.prototype.hasOwnProperty.call(body, 'pinned')) {
+      run("UPDATE conversation_members SET pinned_at=? WHERE conv_id=? AND user_id=?", [body.pinned ? new Date().toISOString() : null, cid, req.uid]);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'archived')) {
+      run("UPDATE conversation_members SET archived_at=? WHERE conv_id=? AND user_id=?", [body.archived ? new Date().toISOString() : null, cid, req.uid]);
+    }
+    const row = get('SELECT pinned_at,archived_at FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]);
+    res.json({ ok:1, pinned_at: row?.pinned_at || null, archived_at: row?.archived_at || null });
+  });
+
+  app.get('/api/chats/saved', auth, (req, res) => {
+    const rows = all(`
+      SELECT m.id,m.conv_id,m.sender_id,m.content,m.file,m.file_type,m.file_name,m.file_size,m.edited_at,m.deleted_at,m.created_at,m.reply_to,m.reply_text,m.forwarded_from,
+             sm.created_at AS saved_at,u.username,u.display_name,u.avatar,u.is_verified,c.is_group,c.title
+      FROM saved_messages sm
+      JOIN messages m ON m.id=sm.msg_id
+      JOIN users u ON u.id=m.sender_id
+      JOIN conversations c ON c.id=m.conv_id
+      JOIN conversation_members cm ON cm.conv_id=m.conv_id AND cm.user_id=sm.user_id
+      WHERE sm.user_id=? AND m.deleted_at IS NULL
+      ORDER BY sm.created_at DESC LIMIT 100
+    `, [req.uid]);
+    res.json(enrichMessages(rows, req.uid));
   });
   app.get('/api/chats/:cid/messages', auth, (req, res) => {
     const cid=req.params.cid;
@@ -1630,10 +1798,10 @@ function main() {
       if (has_more) msgs.pop();
       msgs.reverse(); // ASC for display
     }
-    const others=all('SELECT user_id,last_read FROM conversation_members WHERE conv_id=? AND user_id!=?',[cid,req.uid]);
-    // Only expose other_last_read if the reading user has show_read_receipts enabled
+    const others=all('SELECT cm.user_id,cm.last_read,u.show_read_receipts FROM conversation_members cm JOIN users u ON u.id=cm.user_id WHERE cm.conv_id=? AND cm.user_id!=?',[cid,req.uid]);
     const meRow=get('SELECT show_read_receipts FROM users WHERE id=?',[req.uid]);
-    const other_last_read=others.length===1&&meRow?.show_read_receipts!==0?others[0].last_read:null;
+    // A DM read timestamp is visible only when the other participant allows read receipts.
+    const other_last_read=others.length===1&&others[0].show_read_receipts!==0?others[0].last_read:null;
     const now=new Date().toISOString();
     run('UPDATE conversation_members SET last_read=? WHERE conv_id=? AND user_id=?',[now,cid,req.uid]);
     // Only push msg_read events if this user has show_read_receipts on
@@ -1653,10 +1821,11 @@ function main() {
       return res.status(403).json({ error: 'forbidden' });
     const offset = +req.query.offset || 0;
     const media = all(`
-      SELECT m.id, m.file, m.file_type, m.file_name, m.file_size, m.created_at, m.sender_id,
+      SELECT m.id, m.content, m.file, m.file_type, m.file_name, m.file_size, m.created_at, m.sender_id,
              u.display_name, u.avatar
       FROM messages m JOIN users u ON u.id=m.sender_id
-      WHERE m.conv_id=? AND m.file IS NOT NULL AND m.file != '' AND m.deleted_at IS NULL
+      WHERE m.conv_id=? AND m.deleted_at IS NULL
+        AND ((m.file IS NOT NULL AND m.file != '') OR m.content LIKE '%http://%' OR m.content LIKE '%https://%')
       ORDER BY m.created_at DESC LIMIT 50 OFFSET ?
     `, [cid, offset]);
     res.json(media);
@@ -1841,6 +2010,24 @@ function main() {
   });
 
   // ── BLOCKS ──
+  app.post('/api/chats/:cid/messages/:mid/save', auth, (req, res) => {
+    const { cid, mid } = req.params;
+    if (!get('SELECT 1 FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]))
+      return res.status(403).json({ error:'forbidden' });
+    if (!get('SELECT 1 FROM messages WHERE id=? AND conv_id=? AND deleted_at IS NULL', [mid, cid]))
+      return res.status(404).json({ error:'not found' });
+    run('INSERT OR IGNORE INTO saved_messages (user_id,msg_id) VALUES(?,?)', [req.uid, mid]);
+    res.json({ ok:1, saved:true });
+  });
+
+  app.delete('/api/chats/:cid/messages/:mid/save', auth, (req, res) => {
+    const { cid, mid } = req.params;
+    if (!get('SELECT 1 FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]))
+      return res.status(403).json({ error:'forbidden' });
+    run('DELETE FROM saved_messages WHERE user_id=? AND msg_id=?', [req.uid, mid]);
+    res.json({ ok:1, saved:false });
+  });
+
   app.post('/api/user/:u/block', auth, (req,res) => {
     const target = get('SELECT id FROM users WHERE username=?', [req.params.u]);
     if (!target) return res.status(404).json({error:'not found'});
@@ -2248,6 +2435,54 @@ function main() {
     res.json(list);
   });
 
+  app.get('/api/admin/diagnostics', adminAuth, (req, res) => {
+    const dbStats = {
+      users: get('SELECT COUNT(*) AS c FROM users').c,
+      posts: get('SELECT COUNT(*) AS c FROM posts').c,
+      messages: get('SELECT COUNT(*) AS c FROM messages WHERE deleted_at IS NULL').c,
+      conversations: get('SELECT COUNT(*) AS c FROM conversations').c,
+      files: get('SELECT COUNT(*) AS c FROM disk_files').c,
+      sessions: get('SELECT COUNT(*) AS c FROM sessions').c,
+      reports_open: get("SELECT COUNT(*) AS c FROM reports WHERE status='open'").c,
+    };
+    const jobStats = {
+      pending: get(`SELECT COUNT(*) AS c FROM background_jobs WHERE status='pending'`).c,
+      running: get(`SELECT COUNT(*) AS c FROM background_jobs WHERE status='running'`).c,
+      failed: get(`SELECT COUNT(*) AS c FROM background_jobs WHERE status='failed'`).c,
+      done_24h: get(`SELECT COUNT(*) AS c FROM background_jobs WHERE status='done' AND datetime(updated_at) > datetime('now', '-1 day')`).c,
+    };
+    const mem = process.memoryUsage();
+    res.json({
+      uptime_sec: Math.floor(process.uptime()),
+      node: process.version,
+      env: process.env.NODE_ENV || 'development',
+      build: 'bg-jobs-skeleton',
+      req_id: req.id || null,
+      memory: {
+        rss: mem.rss,
+        heap_total: mem.heapTotal,
+        heap_used: mem.heapUsed,
+        external: mem.external,
+      },
+      db: dbStats,
+      background_jobs: jobStats,
+      recent_errors: RECENT_ERRORS.slice(-12).reverse(),
+    });
+  });
+
+  app.get('/api/admin/jobs', adminAuth, (req, res) => {
+    const limit = Math.min(80, Math.max(10, parseInt(req.query.limit, 10) || 40));
+    const rows = all(`SELECT id,type,status,attempts,max_attempts,created_at,updated_at,run_after,substr(error,1,200) AS error_short,substr(result,1,120) AS result_short FROM background_jobs ORDER BY created_at DESC LIMIT ?`, [limit]);
+    res.json({ jobs: rows });
+  });
+
+  app.post('/api/admin/jobs/test', adminAuth, limiterAdminJobTest, (req, res) => {
+    const t = (req.body && req.body.type) || 'noop';
+    if (t !== 'noop') return res.status(400).json({ error: 'only noop supported' });
+    const id = enqueueBackgroundJob('noop', { at: new Date().toISOString() });
+    res.json({ ok: 1, job_id: id });
+  });
+
   // ── DISK ──
   const DISK_ALLOWED_EXT = new Set(['.mp3','.wav','.flac','.aac','.ogg','.m4a','.opus',
     '.mp4','.mov','.webm','.mkv','.avi',
@@ -2277,7 +2512,7 @@ function main() {
   // ── DISK FILES ──
   app.get('/api/disk', auth, (req, res) => {
     const folderId = req.query.folder_id || null;
-    const files = all(`SELECT df.id,df.name,df.path,df.size,df.mime,df.description,df.folder_id,df.public_token,df.created_at,
+    const files = all(`SELECT df.id,df.name,df.path,df.size,df.mime,df.description,df.folder_id,df.public_token,df.preview_path,df.created_at,
       u.username,u.display_name,u.avatar
       FROM disk_files df JOIN users u ON u.id=df.user_id
       WHERE df.user_id=? AND ${folderId ? 'df.folder_id=?' : 'df.folder_id IS NULL'}
@@ -2296,15 +2531,20 @@ function main() {
     const folderId = req.body.folder_id || null;
     run('INSERT INTO disk_files (id,user_id,name,size,mime,path,description,folder_id) VALUES(?,?,?,?,?,?,?,?)',
       [id, req.uid, origName, req.file.size, req.file.mimetype || '', '/disk/' + storedName, desc, folderId]);
+    const mime = (req.file.mimetype || '').toLowerCase();
+    if (mime.startsWith('image/')) {
+      try { enqueueBackgroundJob('disk_image_preview', { disk_file_id: id }); } catch (e) { logger.error(e, 'enqueue disk_image_preview'); }
+    }
     res.json({ ok: 1, id });
   });
 
   app.delete('/api/disk/:id', auth, (req, res) => {
-    const f = get('SELECT user_id,path FROM disk_files WHERE id=?', [req.params.id]);
+    const f = get('SELECT user_id,path,preview_path FROM disk_files WHERE id=?', [req.params.id]);
     if (!f) return res.status(404).json({ error: 'Not found' });
     const u = get('SELECT is_admin FROM users WHERE id=?', [req.uid]);
     if (f.user_id !== req.uid && !u?.is_admin) return res.status(403).json({ error: 'forbidden' });
     try { fs.unlinkSync(p.join(DATA, f.path.replace(/^\/disk\//, 'disk/'))); } catch {}
+    if (f.preview_path) try { fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch {}
     run('DELETE FROM disk_files WHERE id=?', [req.params.id]);
     res.json({ ok: 1 });
   });
@@ -2389,9 +2629,10 @@ function main() {
       subs.forEach(s => { toDelete.push(s.id); queue.push(s.id); });
     }
     toDelete.forEach(fid => {
-      const files = all('SELECT path FROM disk_files WHERE folder_id=?', [fid]);
+      const files = all('SELECT path, preview_path FROM disk_files WHERE folder_id=?', [fid]);
       files.forEach(file => {
         try { fs.unlinkSync(p.join(DATA, file.path.replace(/^\/disk\//, 'disk/'))); } catch {}
+        if (file.preview_path) try { fs.unlinkSync(p.join(DATA, file.preview_path.replace(/^\//, ''))); } catch {}
       });
       run('DELETE FROM disk_files WHERE folder_id=?', [fid]);
       run('DELETE FROM disk_folders WHERE id=?', [fid]);
@@ -2459,19 +2700,31 @@ function main() {
 
   app.use('/disk', auth, express.static(DISK_DIR));
 
-  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'disk-file-types' }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'drops-nav-fix' }));
 
   app.get('*', (req,res) => res.sendFile(p.join(__dirname,'public','index.html')));
   // Global error handler — never expose stack traces to clients
   app.use((err, req, res, _next) => {
-    logger.error(err);
+    RECENT_ERRORS.push({
+      at: new Date().toISOString(),
+      req_id: req.id || null,
+      path: req.path,
+      method: req.method,
+      message: err?.message || 'Unknown error',
+      status: err?.status || 500,
+    });
+    if (RECENT_ERRORS.length > MAX_RECENT_ERRORS) RECENT_ERRORS.splice(0, RECENT_ERRORS.length - MAX_RECENT_ERRORS);
+    logger.error({ err, reqId: req.id, path: req.path, method: req.method }, 'Unhandled error');
     res.status(err.status || 500).json({
-      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+      req_id: req.id || null
     });
   });
   process.on('SIGINT',  ()=>{ save(); process.exit(0); });
   process.on('SIGTERM', ()=>{ save(); process.exit(0); });
   app.listen(PORT, '0.0.0.0', () => logger.info({ port: PORT }, 'W0pium started'));
+
+  setInterval(() => { backgroundWorkerTick().catch(e => logger.error(e, 'backgroundWorkerTick')); }, 2_500);
 
   setInterval(() => {
     // Find newly-due scheduled posts and clear their scheduled_at
