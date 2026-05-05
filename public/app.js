@@ -807,7 +807,8 @@ async function init() {
   else if (_pn.startsWith('/hashtag/')) { _startPage = 'hashtag'; _startParam = decodeURIComponent(_pn.slice(9)); }
   else {
     const _pm = { '/disk':'disk','/drops':'drops','/discover':'discover','/artists':'artists',
-      '/settings':'settings','/notifs':'notifs','/chats':'chats','/admin':'admin','/hub':'hub','/search':'search' };
+      '/settings':'settings','/notifs':'notifs','/notifications':'notifs','/chats':'chats',
+      '/admin':'admin','/hub':'hub','/search':'search','/bookmarks':'bookmarks','/feed':'feed' };
     _startPage = _pm[_pn] || 'feed';
   }
   if (me) go(_startPage, _startParam, 'replace');
@@ -2374,6 +2375,7 @@ async function renderBookmarks(app) {
   try {
     const posts = await api('/bookmarks');
     app.innerHTML = `
+      ${opiumCommandStrip('')}
       ${pageTitleIc('bookmark', 'СОХРАНЁННЫЕ')}
       <div id="posts">${posts.length ? posts.map(postHtml).join('') : '<div class="empty">Нет сохранённых постов</div>'}</div>
     `;
@@ -2556,12 +2558,12 @@ async function renderArtists(app) {
   const artists = await api('/artists');
   app.innerHTML = `
     ${opiumCommandStrip('search')}
+    ${pageTitleIc('profile', 'ARTISTS')}
     ${opiumMetricCards([
       { label: 'network', value: artists.length, note: 'artists inside' },
       { label: 'access', value: 'invite', note: 'closed graph' },
       { label: 'signal', value: 'profiles', note: 'links and posts' },
     ])}
-    ${pageTitleIc('profile', 'ARTISTS')}
     <div class="search-wrap"><input class="input" id="artistsSearchInput" type="text" placeholder="Поиск артистов..."></div>
     <div id="artList">${artists.length ? artists.map(artRow).join('') : '<div class="empty">Пока никого нет</div>'}</div>
   `;
