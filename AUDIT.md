@@ -313,6 +313,9 @@ For each bug found, copy this block:
 | Hub live data | Requires platform API keys configured in Hub settings |
 | Federation / Hub logic | UI exists, distributed sync not fully implemented |
 | `/profile` (no username) on hard reload | Redirects to Feed — known SPA limitation; use `/profile/wf` instead |
+| Same-browser dual-user testing | Tabs share the same `httpOnly` session cookie — logout in one tab clears all. **Use two different browsers** (e.g. Chrome for `wf`, Firefox for `vf`) to run both sessions simultaneously |
+| Network Signal shows own posts | `hot_posts` query is platform-wide by design — includes your own content |
+| Archive available from Discover view | Intentional — `actionsHtml()` gates archive on `isOwn`; owner can archive their post from any view |
 
 ---
 
