@@ -2051,10 +2051,10 @@ function socialOverviewHtml(data) {
         ${avatarEl(u.avatar, 'avatar-sm', initial(u.display_name))}
         <div>
           <div class="suggestion-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</div>
-          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.mutuals || 0} mutual &middot; ${u.followers || 0} followers</div>
+          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.mutuals || 0} общих &middot; ${u.followers || 0} подписчиков</div>
         </div>
       </div>
-      <button class="btn btn-sm btn-ic-row" data-post-action="follow-suggested" data-user-id="${esc(u.id)}">${iconCut('add', 'ui-icon', 13, 13)}FOLLOW</button>
+      <button class="btn btn-sm btn-ic-row" data-post-action="follow-suggested" data-user-id="${esc(u.id)}">${iconCut('add', 'ui-icon', 13, 13)}ПОДПИСАТЬСЯ</button>
     </div>
   `).join('');
   const tags = (data?.trending_tags || []).map(t => {
@@ -2257,10 +2257,10 @@ function exploreOverviewHtml(data) {
         ${avatarEl(u.avatar, 'avatar-sm', initial(u.display_name))}
         <div>
           <div class="suggestion-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</div>
-          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.followers || 0} followers &middot; ${u.posts || 0} posts</div>
+          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.followers || 0} подписчиков &middot; ${u.posts || 0} постов</div>
         </div>
       </div>
-      <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-profile" data-username="${esc(u.username)}">${iconCut('profile', 'ui-icon', 13, 13)}VIEW</button>
+      <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-profile" data-username="${esc(u.username)}">${iconCut('profile', 'ui-icon', 13, 13)}ПРОФИЛЬ</button>
     </div>
   `).join('');
   const files = (data?.files || []).map(f => `
@@ -2276,15 +2276,15 @@ function exploreOverviewHtml(data) {
   return `
     <div class="social-overview explore-overview">
       <section class="social-card">
-        <div class="social-card-head"><div><span>CREATORS</span><strong>people moving</strong></div></div>
-        <div class="suggestion-list">${creators || '<div class="social-empty">No creators yet</div>'}</div>
+        <div class="social-card-head"><div><span>CREATORS</span><strong>артисты сети</strong></div></div>
+        <div class="suggestion-list">${creators || '<div class="social-empty">Нет артистов</div>'}</div>
       </section>
       <section class="social-card">
-        <div class="social-card-head"><div><span>TAGS</span><strong>conversation map</strong></div></div>
+        <div class="social-card-head"><div><span>TAGS</span><strong>карта тегов</strong></div></div>
         <div class="trend-chips">${tags || '<div class="social-empty">Нет тегов</div>'}</div>
       </section>
       <section class="social-card">
-        <div class="social-card-head"><div><span>PUBLIC DISK</span><strong>shared files</strong></div></div>
+        <div class="social-card-head"><div><span>PUBLIC DISK</span><strong>файлы сети</strong></div></div>
         <div class="profile-file-list">${files || '<div class="social-empty">Нет публичных файлов</div>'}</div>
       </section>
     </div>
@@ -3165,13 +3165,13 @@ function profileShowcaseHtml(showcase) {
   if (!post && !file && !drop && !mutuals) return '';
   return `
     <section class="profile-showcase">
-      <div class="social-card-head"><div><span>SHOWCASE</span><strong>${post ? 'featured post' : file ? 'public disk' : 'network'}</strong></div></div>
+      <div class="social-card-head"><div><span>SHOWCASE</span><strong>${post ? 'закреплённый пост' : file ? 'публичный диск' : 'сеть'}</strong></div></div>
       <div class="profile-showcase-grid">
-        ${post ? `<div class="showcase-tile" data-post-action="expand-post" data-post-id="${esc(post.id)}"><span>POST</span><strong>${esc((post.content || 'media post').slice(0, 110))}</strong><small>${post.likes || 0} likes &middot; ${post.comments || 0} comments</small></div>` : ''}
-        ${drop ? `<div class="showcase-tile" data-post-action="go" data-nav-target="drops"><span>DROP</span><strong>${esc((drop.content || 'active drop').slice(0, 90))}</strong><small>${drop.view_count || 0} views</small></div>` : ''}
+        ${post ? `<div class="showcase-tile" data-post-action="expand-post" data-post-id="${esc(post.id)}"><span>POST</span><strong>${esc((post.content || 'медиапост').slice(0, 110))}</strong><small>${post.likes || 0} лайков &middot; ${post.comments || 0} коммент.</small></div>` : ''}
+        ${drop ? `<div class="showcase-tile" data-post-action="go" data-nav-target="drops"><span>DROP</span><strong>${esc((drop.content || 'активный дроп').slice(0, 90))}</strong><small>${drop.view_count || 0} просмотров</small></div>` : ''}
         ${file ? `<a class="showcase-tile" href="/pub/${esc(file.public_token)}" target="_blank" rel="noopener"><span>DISK</span><strong>${esc(file.name)}</strong><small>${fmtBytes(file.size || 0)}${file.description ? ` &middot; ${esc(file.description)}` : ''}</small></a>` : ''}
       </div>
-      ${mutuals ? `<div class="profile-mutuals"><span>Mutuals</span>${mutuals}</div>` : ''}
+      ${mutuals ? `<div class="profile-mutuals"><span>Общие</span>${mutuals}</div>` : ''}
     </section>
   `;
 }

@@ -3627,7 +3627,7 @@ img.ui-icon {
   .admin-user-create { grid-template-columns: 1fr; }
   .admin-actions { flex-wrap: wrap; }
 }
-.btn-danger { border-color: var(--red) !important; color: var(--red) !important; }
+.btn-danger { background: transparent !important; border: 1px solid var(--red) !important; color: var(--red) !important; }
 .btn-danger:hover { background: var(--red) !important; color: #fff !important; }
 :root:not(.light) .btn-danger:hover { color: #000 !important; }
 .badge-admin {
