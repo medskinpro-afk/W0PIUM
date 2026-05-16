@@ -1998,6 +1998,13 @@ async function unpinPost(id) {
 }
 
 function initial(name) { return (name||'?')[0].toUpperCase(); }
+function pluralRu(n, one, few, many) {
+  const m = Math.abs(n) % 100, d = m % 10;
+  if (m >= 11 && m <= 19) return many;
+  if (d === 1) return one;
+  if (d >= 2 && d <= 4) return few;
+  return many;
+}
 function verifiedBadge(isVerified, badgeType) {
   if (!isVerified) return '';
   const title = badgeType ? `Верифицировано: ${badgeType}` : 'Верифицированный пользователь';
@@ -2051,7 +2058,7 @@ function socialOverviewHtml(data) {
         ${avatarEl(u.avatar, 'avatar-sm', initial(u.display_name))}
         <div>
           <div class="suggestion-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</div>
-          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.mutuals || 0} общих &middot; ${u.followers || 0} подписчиков</div>
+          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.mutuals || 0} общих &middot; ${u.followers || 0} ${pluralRu(u.followers||0,'подписчик','подписчика','подписчиков')}</div>
         </div>
       </div>
       <button class="btn btn-sm btn-ic-row" data-post-action="follow-suggested" data-user-id="${esc(u.id)}">${iconCut('add', 'ui-icon', 13, 13)}ПОДПИСАТЬСЯ</button>
@@ -2257,7 +2264,7 @@ function exploreOverviewHtml(data) {
         ${avatarEl(u.avatar, 'avatar-sm', initial(u.display_name))}
         <div>
           <div class="suggestion-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</div>
-          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.followers || 0} подписчиков &middot; ${u.posts || 0} постов</div>
+          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.followers || 0} ${pluralRu(u.followers||0,'подписчик','подписчика','подписчиков')} &middot; ${u.posts || 0} ${pluralRu(u.posts||0,'пост','поста','постов')}</div>
         </div>
       </div>
       <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-profile" data-username="${esc(u.username)}">${iconCut('profile', 'ui-icon', 13, 13)}ПРОФИЛЬ</button>
@@ -3167,8 +3174,8 @@ function profileShowcaseHtml(showcase) {
     <section class="profile-showcase">
       <div class="social-card-head"><div><span>SHOWCASE</span><strong>${post ? 'закреплённый пост' : file ? 'публичный диск' : 'сеть'}</strong></div></div>
       <div class="profile-showcase-grid">
-        ${post ? `<div class="showcase-tile" data-post-action="expand-post" data-post-id="${esc(post.id)}"><span>POST</span><strong>${esc((post.content || 'медиапост').slice(0, 110))}</strong><small>${post.likes || 0} лайков &middot; ${post.comments || 0} коммент.</small></div>` : ''}
-        ${drop ? `<div class="showcase-tile" data-post-action="go" data-nav-target="drops"><span>DROP</span><strong>${esc((drop.content || 'активный дроп').slice(0, 90))}</strong><small>${drop.view_count || 0} просмотров</small></div>` : ''}
+        ${post ? `<div class="showcase-tile" data-post-action="expand-post" data-post-id="${esc(post.id)}"><span>POST</span><strong>${esc((post.content || 'медиапост').slice(0, 110))}</strong><small>${post.likes || 0} ${pluralRu(post.likes||0,'лайк','лайка','лайков')} &middot; ${post.comments || 0} коммент.</small></div>` : ''}
+        ${drop ? `<div class="showcase-tile" data-post-action="go" data-nav-target="drops"><span>DROP</span><strong>${esc((drop.content || 'активный дроп').slice(0, 90))}</strong><small>${drop.view_count || 0} ${pluralRu(drop.view_count||0,'просмотр','просмотра','просмотров')}</small></div>` : ''}
         ${file ? `<a class="showcase-tile" href="/pub/${esc(file.public_token)}" target="_blank" rel="noopener"><span>DISK</span><strong>${esc(file.name)}</strong><small>${fmtBytes(file.size || 0)}${file.description ? ` &middot; ${esc(file.description)}` : ''}</small></a>` : ''}
       </div>
       ${mutuals ? `<div class="profile-mutuals"><span>Общие</span>${mutuals}</div>` : ''}
