@@ -57,7 +57,8 @@ function decryptEmail(stored) {
     const decipher = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, Buffer.from(ivHex, 'hex'));
     decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
     return decipher.update(Buffer.from(encHex, 'hex')) + decipher.final('utf8');
-  } catch {
+  } catch (e) {
+    logger.warn({ error: e.message, stored: stored.slice(0, 20) + '...' }, 'email decryption failed');
     return stored; // fallback: return as-is if decryption fails
   }
 }
@@ -141,7 +142,7 @@ async function isSsrfBlocked(rawUrl) {
     // Resolve to IP and re-check — catches non-standard formats and DNS rebinding
     const { address } = await dns.lookup(hostname, { verbatim: false });
     return _ssrfBlockedRe.test(address);
-  } catch { return true; }
+  } catch (e) { logger.debug({ url: rawUrl?.slice(0, 50), error: e.message }, 'SSRF check failed - blocking'); return true; }
 }
 
 let db;
@@ -330,29 +331,29 @@ function main() {
 
   [
     'ALTER TABLE conversations ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0',
-    "ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT ''",
-    "ALTER TABLE conversations ADD COLUMN owner TEXT DEFAULT ''",
-    "ALTER TABLE conversation_members ADD COLUMN role TEXT DEFAULT 'member'",
-    "ALTER TABLE messages ADD COLUMN file TEXT DEFAULT ''",
-    "ALTER TABLE messages ADD COLUMN file_type TEXT DEFAULT ''",
+    'ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT \'\'',
+    'ALTER TABLE conversations ADD COLUMN owner TEXT DEFAULT \'\'',
+    'ALTER TABLE conversation_members ADD COLUMN role TEXT DEFAULT \'member\'',
+    'ALTER TABLE messages ADD COLUMN file TEXT DEFAULT \'\'',
+    'ALTER TABLE messages ADD COLUMN file_type TEXT DEFAULT \'\'',
     'ALTER TABLE messages ADD COLUMN file_size INTEGER DEFAULT 0',
     'ALTER TABLE messages ADD COLUMN edited_at DATETIME',
     'ALTER TABLE messages ADD COLUMN deleted_at DATETIME',
     'ALTER TABLE users ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0',
-    "ALTER TABLE users ADD COLUMN invite_code TEXT DEFAULT ''",
-    "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
+    'ALTER TABLE users ADD COLUMN invite_code TEXT DEFAULT \'\'',
+    'ALTER TABLE users ADD COLUMN email TEXT DEFAULT \'\'',
     'ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0',
-    "ALTER TABLE users ADD COLUMN email_token TEXT DEFAULT ''",
+    'ALTER TABLE users ADD COLUMN email_token TEXT DEFAULT \'\'',
     'ALTER TABLE users ADD COLUMN email_token_exp DATETIME',
     'ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0',
     'ALTER TABLE users ADD COLUMN banned_at DATETIME',
-    "ALTER TABLE users ADD COLUMN ban_reason TEXT DEFAULT ''",
-    "ALTER TABLE drops ADD COLUMN caption TEXT DEFAULT ''",
-    "ALTER TABLE drops ADD COLUMN img TEXT DEFAULT ''",
+    'ALTER TABLE users ADD COLUMN ban_reason TEXT DEFAULT \'\'',
+    'ALTER TABLE drops ADD COLUMN caption TEXT DEFAULT \'\'',
+    'ALTER TABLE drops ADD COLUMN img TEXT DEFAULT \'\'',
     'ALTER TABLE drops ADD COLUMN expires_at DATETIME',
-    "ALTER TABLE users ADD COLUMN used_code TEXT DEFAULT ''",
-    "ALTER TABLE users ADD COLUMN email_hash TEXT DEFAULT ''",
-    "ALTER TABLE messages ADD COLUMN file_name TEXT DEFAULT ''",
+    'ALTER TABLE users ADD COLUMN used_code TEXT DEFAULT \'\'',
+    'ALTER TABLE users ADD COLUMN email_hash TEXT DEFAULT \'\'',
+    'ALTER TABLE messages ADD COLUMN file_name TEXT DEFAULT \'\'',
     "ALTER TABLE conversation_members ADD COLUMN accepted INTEGER DEFAULT 1",
     "ALTER TABLE users ADD COLUMN dm_requests INTEGER DEFAULT 1",
     "ALTER TABLE users ADD COLUMN pinned_post_id TEXT DEFAULT NULL",
@@ -361,32 +362,37 @@ function main() {
     "ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0",
     "ALTER TABLE posts ADD COLUMN archived INTEGER DEFAULT 0",
     "ALTER TABLE posts ADD COLUMN play_count INTEGER DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN badge_type TEXT DEFAULT ''",
-    "ALTER TABLE verification_requests ADD COLUMN reject_reason TEXT DEFAULT ''",
-    "ALTER TABLE disk_files ADD COLUMN folder_id TEXT DEFAULT NULL",
-    "ALTER TABLE disk_files ADD COLUMN public_token TEXT DEFAULT NULL",
-    "ALTER TABLE posts ADD COLUMN text_pos TEXT NOT NULL DEFAULT 'above'",
-    "ALTER TABLE messages ADD COLUMN reply_to TEXT DEFAULT NULL",
-    "ALTER TABLE messages ADD COLUMN reply_text TEXT DEFAULT ''",
-    "ALTER TABLE users ADD COLUMN show_read_receipts INTEGER DEFAULT 1",
-    "ALTER TABLE users ADD COLUMN show_typing INTEGER DEFAULT 1",
-    "ALTER TABLE sessions ADD COLUMN ip TEXT DEFAULT ''",
-    "ALTER TABLE sessions ADD COLUMN user_agent TEXT DEFAULT ''",
-    "ALTER TABLE posts ADD COLUMN edited_at DATETIME",
-    "CREATE TABLE IF NOT EXISTS follow_requests (id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, created_at DATETIME DEFAULT (datetime('now')), FOREIGN KEY (from_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (to_id) REFERENCES users(id) ON DELETE CASCADE)",
-    "CREATE TABLE IF NOT EXISTS post_reactions (post_id TEXT NOT NULL, user_id TEXT NOT NULL, emoji TEXT NOT NULL, created_at DATETIME DEFAULT (datetime('now')), PRIMARY KEY (post_id, user_id), FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)",
-    "ALTER TABLE posts ADD COLUMN scheduled_at DATETIME DEFAULT NULL",
-    "ALTER TABLE messages ADD COLUMN forwarded_from TEXT DEFAULT NULL",
-    "ALTER TABLE conversations ADD COLUMN pinned_msg_id TEXT DEFAULT NULL",
-    "ALTER TABLE conversation_members ADD COLUMN muted_until DATETIME DEFAULT NULL",
-    "ALTER TABLE conversation_members ADD COLUMN pinned_at DATETIME DEFAULT NULL",
-    "ALTER TABLE conversation_members ADD COLUMN archived_at DATETIME DEFAULT NULL",
-    "ALTER TABLE users ADD COLUMN last_seen DATETIME DEFAULT NULL",
-    "ALTER TABLE conversations ADD COLUMN avatar TEXT DEFAULT ''",
-    "CREATE TABLE IF NOT EXISTS background_jobs (id TEXT PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', payload TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 5, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), run_after TEXT DEFAULT (datetime('now')))",
-    "ALTER TABLE disk_files ADD COLUMN preview_path TEXT DEFAULT ''",
-  ].forEach(s => { try { db.exec(s); } catch {} });
-  try { run(`UPDATE background_jobs SET status='pending', updated_at=datetime('now') WHERE status='running'`); } catch {}
+    'ALTER TABLE users ADD COLUMN badge_type TEXT DEFAULT \'\'',
+    'ALTER TABLE verification_requests ADD COLUMN reject_reason TEXT DEFAULT \'\'',
+    'ALTER TABLE disk_files ADD COLUMN folder_id TEXT DEFAULT NULL',
+    'ALTER TABLE disk_files ADD COLUMN public_token TEXT DEFAULT NULL',
+    'ALTER TABLE posts ADD COLUMN text_pos TEXT NOT NULL DEFAULT \'above\'',
+    'ALTER TABLE messages ADD COLUMN reply_to TEXT DEFAULT NULL',
+    'ALTER TABLE messages ADD COLUMN reply_text TEXT DEFAULT \'\'',
+    'ALTER TABLE users ADD COLUMN show_read_receipts INTEGER DEFAULT 1',
+    'ALTER TABLE users ADD COLUMN show_typing INTEGER DEFAULT 1',
+    'ALTER TABLE sessions ADD COLUMN ip TEXT DEFAULT \'\'',
+    'ALTER TABLE sessions ADD COLUMN user_agent TEXT DEFAULT \'\'',
+    'ALTER TABLE posts ADD COLUMN edited_at DATETIME',
+    'CREATE TABLE IF NOT EXISTS follow_requests (id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, created_at DATETIME DEFAULT (datetime(\'now\')), FOREIGN KEY (from_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (to_id) REFERENCES users(id) ON DELETE CASCADE)',
+    'CREATE TABLE IF NOT EXISTS post_reactions (post_id TEXT NOT NULL, user_id TEXT NOT NULL, emoji TEXT NOT NULL, created_at DATETIME DEFAULT (datetime(\'now\')), PRIMARY KEY (post_id, user_id), FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)',
+    'ALTER TABLE posts ADD COLUMN scheduled_at DATETIME DEFAULT NULL',
+    'ALTER TABLE messages ADD COLUMN forwarded_from TEXT DEFAULT NULL',
+    'ALTER TABLE conversations ADD COLUMN pinned_msg_id TEXT DEFAULT NULL',
+    'ALTER TABLE conversation_members ADD COLUMN muted_until DATETIME DEFAULT NULL',
+    'ALTER TABLE conversation_members ADD COLUMN pinned_at DATETIME DEFAULT NULL',
+    'ALTER TABLE conversation_members ADD COLUMN archived_at DATETIME DEFAULT NULL',
+    'ALTER TABLE users ADD COLUMN last_seen DATETIME DEFAULT NULL',
+    'ALTER TABLE conversations ADD COLUMN avatar TEXT DEFAULT \'\'',
+    'CREATE TABLE IF NOT EXISTS background_jobs (id TEXT PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL DEFAULT \'pending\', payload TEXT NOT NULL DEFAULT \'\', result TEXT NOT NULL DEFAULT \'\', error TEXT NOT NULL DEFAULT \'\', attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 5, created_at TEXT DEFAULT (datetime(\'now\')), updated_at TEXT DEFAULT (datetime(\'now\')), run_after TEXT DEFAULT (datetime(\'now\')))',
+    'ALTER TABLE disk_files ADD COLUMN preview_path TEXT DEFAULT \'\'',
+    'ALTER TABLE comments ADD COLUMN parent_id TEXT DEFAULT \'\'',
+    'ALTER TABLE comments ADD COLUMN edited_at DATETIME',
+    'CREATE TABLE IF NOT EXISTS comment_likes (comment_id TEXT NOT NULL, user_id TEXT NOT NULL, created_at DATETIME DEFAULT (datetime(\'now\')), PRIMARY KEY (comment_id, user_id), FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)',
+    'CREATE INDEX IF NOT EXISTS idx_comments_post_parent ON comments(post_id, parent_id, created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_comment_likes_comment ON comment_likes(comment_id)',
+  ].forEach(s => { try { db.exec(s); } catch (e) { logger.debug({ sql: s.slice(0, 60), error: e.message }, 'migration skipped'); } });
+  try { run(`UPDATE background_jobs SET status='pending', updated_at=datetime('now') WHERE status='running'`); } catch (e) { logger.warn({ error: e.message }, 'background jobs reset failed'); }
   // FTS5 for full-text post search
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(content, post_id UNINDEXED, tokenize='unicode61')`);
   db.exec(`CREATE TRIGGER IF NOT EXISTS posts_fts_insert AFTER INSERT ON posts BEGIN
@@ -401,18 +407,18 @@ function main() {
   // Populate FTS for existing posts (idempotent via INSERT OR IGNORE)
   try {
     db.exec(`INSERT OR IGNORE INTO posts_fts(content, post_id) SELECT content, id FROM posts WHERE content != ''`);
-  } catch {}
+  } catch (e) { logger.debug({ error: e.message }, 'FTS population failed'); }
 
   // backfill expires_at for drops that have none
-  try { db.exec("UPDATE drops SET expires_at=datetime(created_at,'+24 hours') WHERE expires_at IS NULL"); } catch {}
+  try { db.exec('UPDATE drops SET expires_at=datetime(created_at,\'+24 hours\') WHERE expires_at IS NULL'); } catch (e) { logger.debug({ error: e.message }, 'drops expires_at backfill failed'); }
   // Grandfather existing users — they registered before email verification was required
-  try { db.exec("UPDATE users SET email_verified=1 WHERE email='' OR email IS NULL"); } catch {}
+  try { db.exec('UPDATE users SET email_verified=1 WHERE email=\'\' OR email IS NULL'); } catch (e) { logger.debug({ error: e.message }, 'users email_verified grandfathering failed'); }
   // Legacy bootstrap is disabled by default; enable only for one-off recovery.
   if (process.env.BOOTSTRAP_ADMIN_USERNAME) {
     try {
-      run("UPDATE users SET is_admin=1 WHERE username=?", [process.env.BOOTSTRAP_ADMIN_USERNAME]);
+      run('UPDATE users SET is_admin=1 WHERE username=?', [process.env.BOOTSTRAP_ADMIN_USERNAME]);
       logger.warn(`bootstrap_admin: granted admin to ${process.env.BOOTSTRAP_ADMIN_USERNAME}`);
-    } catch {}
+    } catch (e) { logger.debug({ error: e.message }, 'bootstrap admin failed'); }
   }
 
   // Performance indexes
@@ -438,6 +444,7 @@ function main() {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc:  ["'self'"],
+        scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc:   ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc:    ["'self'", "https://fonts.gstatic.com"],
         imgSrc:     ["'self'", "data:", "blob:"],
@@ -460,7 +467,23 @@ function main() {
   app.use(express.json());
   app.use(cookieParser());
   app.use(csrfCheck);
-  app.use(express.static(p.join(__dirname, 'public')));
+  app.use((req, res, next) => {
+    if (
+      req.path === '/' ||
+      req.path === '/index.html' ||
+      req.path === '/service-worker.js' ||
+      /\.(?:js|css)$/.test(req.path)
+    ) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    next();
+  });
+  app.use(express.static(p.join(__dirname, 'public'), {
+    etag: false,
+    lastModified: false,
+  }));
   app.use('/icons_cut', express.static(p.join(__dirname, 'icons_cut')));
   app.use('/avatars',    express.static(AVA_DIR));
   app.use('/images',     express.static(IMG_DIR));
@@ -510,9 +533,9 @@ function main() {
 
   function auth(req, res, next) {
     const t = req.cookies.token || req.headers['x-token'];
-    if (!t) return res.status(401).json({ error:'auth' });
+    if (!t) return res.status(401).json({ error:'unauthenticated' });
     const s = get('SELECT user_id FROM sessions WHERE token=?', [t]);
-    if (!s) return res.status(401).json({ error:'auth' });
+    if (!s) return res.status(401).json({ error:'unauthenticated' });
     const u = get('SELECT banned_at FROM users WHERE id=?', [s.user_id]);
     if (u && u.banned_at) return res.status(403).json({ error:'banned' });
     req.uid = s.user_id;
@@ -520,15 +543,15 @@ function main() {
     const last = lastSeenCache.get(s.user_id) || 0;
     if (now - last > 60_000) { // update at most once per minute
       lastSeenCache.set(s.user_id, now);
-      run("UPDATE users SET last_seen=datetime('now') WHERE id=?", [s.user_id]);
+      run('UPDATE users SET last_seen=datetime(\'now\') WHERE id=?', [s.user_id]);
     }
     next();
   }
   function adminAuth(req, res, next) {
     const t = req.cookies.token || req.headers['x-token'];
-    if (!t) return res.status(401).json({ error:'auth' });
+    if (!t) return res.status(401).json({ error:'unauthenticated' });
     const s = get('SELECT user_id FROM sessions WHERE token=?', [t]);
-    if (!s) return res.status(401).json({ error:'auth' });
+    if (!s) return res.status(401).json({ error:'unauthenticated' });
     const u = get('SELECT is_admin FROM users WHERE id=?', [s.user_id]);
     if (!u || !u.is_admin) return res.status(403).json({ error:'forbidden' });
     req.uid = s.user_id; next();
@@ -551,7 +574,7 @@ function main() {
       if (!crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expPad))) {
         return res.status(403).json({ error:'Неверный CSRF-токен' });
       }
-    } catch { return res.status(403).json({ error:'Неверный CSRF-токен' }); }
+    } catch (e) { logger.debug({ error: e.message }, 'CSRF timingSafeEqual failed'); return res.status(403).json({ error:'Неверный CSRF-токен' }); }
     next();
   }
   function notify(userId, fromId, type, refId) {
@@ -563,11 +586,32 @@ function main() {
     const msgs = { like:'лайкнул твой пост', comment:'прокомментировал твой пост', follow:'подписался на тебя', follow_request:'хочет подписаться на тебя', repost:'репостнул твой пост', dm:'написал тебе' };
     if (msgs[type]) sendPush(userId, `W0PIUM · ${name}`, msgs[type], '/');
   }
+  function publicEsc(v='') {
+    return String(v).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+  function publicShareHtml({ title, description, image, url, type='website' }) {
+    const origin = process.env.PUBLIC_ORIGIN || 'https://w0pium.walfir.com';
+    const img = image ? new URL(image, origin).toString() : '';
+    const canonical = url || origin;
+    return `<!DOCTYPE html><html lang="ru"><head>
+      <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${publicEsc(title)}</title>
+      <meta name="description" content="${publicEsc(description)}">
+      <meta property="og:type" content="${publicEsc(type)}">
+      <meta property="og:title" content="${publicEsc(title)}">
+      <meta property="og:description" content="${publicEsc(description)}">
+      ${img ? `<meta property="og:image" content="${publicEsc(img)}">` : ''}
+      <meta property="og:url" content="${publicEsc(canonical)}">
+      <meta name="twitter:card" content="${img ? 'summary_large_image' : 'summary'}">
+      <meta http-equiv="refresh" content="0;url=${publicEsc(canonical)}">
+      <style>body{font-family:system-ui,sans-serif;background:#050505;color:#f5f5f5;display:grid;place-items:center;min-height:100vh;margin:0}main{max-width:620px;padding:24px}a{color:#fff}</style>
+    </head><body><main><h1>${publicEsc(title)}</h1><p>${publicEsc(description)}</p><p><a href="${publicEsc(canonical)}">Open W0PIUM</a></p></main></body></html>`;
+  }
   function pushEvent(userId, event, data) {
     const list = clients.get(userId);
     if (!list) return;
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    list.forEach(res => { try { res.write(payload); } catch {} });
+    list.forEach(res => { try { res.write(payload); } catch (e) { logger.debug({ userId, event, error: e.message }, 'SSE write failed'); } });
   }
   function genCode() { return crypto.randomBytes(4).toString('hex').toUpperCase().slice(0,6); }
   function ensureInviteCode(userId) {
@@ -603,21 +647,21 @@ function main() {
     // Disk files (+ async-generated previews)
     all('SELECT path, preview_path FROM disk_files WHERE user_id=?', [uid])
       .forEach(f => {
-        try { if (f.path) fs.unlinkSync(p.join(DATA, f.path.replace(/^\//, ''))); } catch {}
-        try { if (f.preview_path) fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch {}
+        try { if (f.path) fs.unlinkSync(p.join(DATA, f.path.replace(/^\//, ''))); } catch (e) { logger.debug({ path: f.path, error: e.message }, 'failed to delete disk file'); }
+        try { if (f.preview_path) fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch (e) { logger.debug({ preview: f.preview_path, error: e.message }, 'failed to delete preview'); }
       });
     // Avatar
     const u = get('SELECT avatar FROM users WHERE id=?', [uid]);
-    if (u?.avatar) try { fs.unlinkSync(p.join(DATA, u.avatar.replace(/^\//, ''))); } catch {}
+    if (u?.avatar) try { fs.unlinkSync(p.join(DATA, u.avatar.replace(/^\//, ''))); } catch (e) { logger.debug({ avatar: u.avatar, error: e.message }, 'failed to delete avatar'); }
     // Post images
-    all("SELECT image FROM posts WHERE user_id=? AND image IS NOT NULL AND image != ''", [uid])
-      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch {} });
+    all('SELECT image FROM posts WHERE user_id=? AND image IS NOT NULL AND image != \'\'', [uid])
+      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch (e) { logger.debug({ image: r.image, error: e.message }, 'failed to delete post image'); } });
     // Message file attachments
-    all("SELECT file FROM messages WHERE sender_id=? AND file IS NOT NULL AND file != ''", [uid])
-      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.file.replace(/^\//, ''))); } catch {} });
+    all('SELECT file FROM messages WHERE sender_id=? AND file IS NOT NULL AND file != \'\'', [uid])
+      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.file.replace(/^\//, ''))); } catch (e) { logger.debug({ file: r.file, error: e.message }, 'failed to delete message file'); } });
     // Drop images
-    all("SELECT image FROM drops WHERE user_id=? AND image IS NOT NULL AND image != ''", [uid])
-      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch {} });
+    all('SELECT image FROM drops WHERE user_id=? AND image IS NOT NULL AND image != \'\'', [uid])
+      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch (e) { logger.debug({ image: r.image, error: e.message }, 'failed to delete drop image'); } });
   }
 
   async function processImage(srcPath, destDir, opts = {}) {
@@ -648,7 +692,7 @@ function main() {
 
   async function executeBackgroundJob(job) {
     let payload = {};
-    try { payload = JSON.parse(job.payload || '{}'); } catch { payload = {}; }
+    try { payload = JSON.parse(job.payload || '{}'); } catch (e) { logger.warn({ jobId: job.id, error: e.message }, 'failed to parse job payload'); payload = {}; }
     if (job.type === 'noop') return { ok: true };
     if (job.type === 'image_webp') {
       const { srcPath, destKey, opts } = payload;
@@ -737,6 +781,8 @@ function main() {
       } catch (e) {
         if (e.statusCode === 410 || e.statusCode === 404) {
           run('DELETE FROM push_subscriptions WHERE endpoint=?', [sub.endpoint]);
+        } else {
+          logger.debug({ endpoint: sub.endpoint.slice(0, 30), error: e.message }, 'push notification failed');
         }
       }
     }
@@ -803,7 +849,7 @@ function main() {
       return res.status(400).json({ error:'Неверный код' });
     if (u.email_token_exp && new Date(u.email_token_exp) < new Date())
       return res.status(400).json({ error:'Код истёк. Запроси новый' });
-    run("UPDATE users SET email_verified=1, email_token='', email_token_exp=NULL WHERE id=?", [u.id]);
+    run('UPDATE users SET email_verified=1, email_token=\'\', email_token_exp=NULL WHERE id=?', [u.id]);
     const t = uuidv4();
     run('INSERT INTO sessions (token,user_id,ip,user_agent) VALUES(?,?,?,?)', [t, u.id, req.ip||'', (req.headers['user-agent']||'').slice(0,200)]);
     res.cookie('token', t, { httpOnly:true, maxAge:30*24*3600000, sameSite:'lax', secure:process.env.NODE_ENV==='production' });
@@ -817,8 +863,10 @@ function main() {
     const verifyToken = String(crypto.randomInt(100000, 1000000));
     const tokenExp = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     run('UPDATE users SET email_token=?, email_token_exp=? WHERE id=?', [verifyToken, tokenExp, u.id]);
-    await sendEmail(decryptEmail(u.email), 'W0PIUM — новый код',
-      `<p>Новый код: <strong style="font-size:24px;letter-spacing:4px">${verifyToken}</strong></p><p>Действует 15 минут.</p>`);
+    try {
+      await sendEmail(decryptEmail(u.email), 'W0PIUM — новый код',
+        `<p>Новый код: <strong style="font-size:24px;letter-spacing:4px">${verifyToken}</strong></p><p>Действует 15 минут.</p>`);
+    } catch (e) { logger.warn({ error: e.message, user: u.id }, 'resend verification email failed'); }
     res.json({ ok:1 });
   });
 
@@ -830,8 +878,10 @@ function main() {
     const token = String(crypto.randomInt(100000, 1000000));
     const exp = new Date(Date.now() + 15*60*1000).toISOString();
     run('UPDATE users SET reset_token=?, reset_token_exp=? WHERE id=?', [token, exp, u.id]);
-    await sendEmail(decryptEmail(u.email), 'W0PIUM — сброс пароля',
-      `<p>Твой код для сброса пароля: <strong style="font-size:24px;letter-spacing:4px">${token}</strong></p><p>Действует 15 минут.</p>`);
+    try {
+      await sendEmail(decryptEmail(u.email), 'W0PIUM — сброс пароля',
+        `<p>Твой код для сброса пароля: <strong style="font-size:24px;letter-spacing:4px">${token}</strong></p><p>Действует 15 минут.</p>`);
+    } catch (e) { logger.warn({ error: e.message, user: u.id }, 'password reset email failed'); }
     res.json({ ok:1 });
   });
 
@@ -926,7 +976,7 @@ function main() {
       // fallback: just rename as-is
       const ext = p.extname(req.file.originalname) || '.jpg';
       const nm = req.uid + ext;
-      try { fs.renameSync(req.file.path, p.join(AVA_DIR, nm)); } catch {}
+      try { fs.renameSync(req.file.path, p.join(AVA_DIR, nm)); } catch (e) { logger.debug({ path: req.file.path, error: e.message }, 'failed to rename avatar fallback'); }
       run('UPDATE users SET avatar=? WHERE id=?', ['/avatars/'+nm, req.uid]);
       res.json({ avatar: '/avatars/'+nm });
     }
@@ -981,7 +1031,7 @@ function main() {
       run('INSERT INTO follows (follower_id,following_id) VALUES(?,?)', [req.uid, req.params.id]);
       notify(req.params.id, req.uid, 'follow', '');
       pushEvent(req.params.id, 'notif', { type:'follow', ref:'' });
-    } catch {}
+    } catch (e) { logger.debug({ error: e.message }, 'follow notification failed'); }
     res.json({ ok:1 });
   });
   app.delete('/api/follow/:id', auth, (req, res) => {
@@ -1000,7 +1050,7 @@ function main() {
   app.post('/api/follow-requests/:id/accept', auth, (req, res) => {
     const row = get('SELECT from_id FROM follow_requests WHERE id=? AND to_id=?', [req.params.id, req.uid]);
     if (!row) return res.status(404).json({ error:'not found' });
-    try { run('INSERT INTO follows (follower_id,following_id) VALUES(?,?)', [row.from_id, req.uid]); } catch {}
+    try { run('INSERT INTO follows (follower_id,following_id) VALUES(?,?)', [row.from_id, req.uid]); } catch (e) { logger.debug({ from_id: row.from_id, to_id: req.uid, error: e.message }, 'follow request accept insert failed'); }
     run('DELETE FROM follow_requests WHERE id=?', [req.params.id]);
     run('DELETE FROM notifications WHERE user_id=? AND from_id=? AND type=?', [req.uid, row.from_id, 'follow_request']);
     notify(row.from_id, req.uid, 'follow', '');
@@ -1033,10 +1083,11 @@ function main() {
       try {
         const nm = await processImage(req.file.path, IMG_DIR, { width: 1200, fit: 'inside' });
         image = '/images/' + nm;
-      } catch {
+      } catch (e) {
+        logger.debug({ path: req.file.path, error: e.message }, 'image processing failed, using fallback');
         const ext = p.extname(req.file.originalname) || '.jpg';
         const nm = uuidv4() + ext;
-        try { fs.renameSync(req.file.path, p.join(IMG_DIR, nm)); } catch {}
+        try { fs.renameSync(req.file.path, p.join(IMG_DIR, nm)); } catch (e2) { logger.debug({ path: req.file.path, error: e2.message }, 'failed to rename uploaded image'); }
         image = '/images/' + nm;
       }
     }
@@ -1048,7 +1099,7 @@ function main() {
     }
     // create poll if options provided
     let pollOptions=[];
-    try { pollOptions=JSON.parse(req.body.poll_options||'[]'); } catch {}
+    try { pollOptions=JSON.parse(req.body.poll_options||'[]'); } catch (e) { logger.debug({ poll_options: req.body.poll_options, error: e.message }, 'failed to parse poll options'); }
     pollOptions=(pollOptions||[]).filter(o=>typeof o==='string'&&o.trim()).slice(0,4);
     if (pollOptions.length>=2) {
       const pollId=uuidv4();
@@ -1207,16 +1258,32 @@ function main() {
 
   app.get('/api/feed', auth, (req, res) => {
     const lim=Math.min(+req.query.limit||30,50), off=+req.query.offset||0;
+    const sort = String(req.query.sort || 'fresh').toLowerCase();
+    const orderBy = sort === 'ranked'
+      ? `((SELECT COUNT(*) FROM likes WHERE post_id=p.id) * 2 +
+          (SELECT COUNT(*) FROM comments WHERE post_id=p.id) * 3 +
+          (SELECT COUNT(*) FROM post_reactions WHERE post_id=p.id) * 2 +
+          (SELECT COUNT(*) FROM bookmarks WHERE post_id=p.id) +
+          CASE WHEN datetime(p.created_at)>datetime('now','-6 hours') THEN 8
+               WHEN datetime(p.created_at)>datetime('now','-1 day') THEN 4 ELSE 0 END) DESC, p.created_at DESC`
+      : 'p.created_at DESC';
     let posts;
-    if (req.uid) posts=all(`SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type FROM posts p JOIN users u ON p.user_id=u.id WHERE (p.user_id=? OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=?)) AND p.archived=0 AND (p.scheduled_at IS NULL OR datetime(p.scheduled_at) <= datetime('now')) AND (p.repost_of='' OR p.content!='') AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=?) AND p.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?) AND p.user_id NOT IN (SELECT muted_id FROM mutes WHERE muter_id=?) ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,[req.uid,req.uid,req.uid,req.uid,req.uid,lim,off]);
-    else posts=all(`SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type FROM posts p JOIN users u ON p.user_id=u.id WHERE p.archived=0 AND (p.scheduled_at IS NULL OR datetime(p.scheduled_at) <= datetime('now')) AND (p.repost_of='' OR p.content!='') ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,[lim,off]);
+    if (req.uid) posts=all(`SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type FROM posts p JOIN users u ON p.user_id=u.id WHERE (p.user_id=? OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=?)) AND p.archived=0 AND (p.scheduled_at IS NULL OR datetime(p.scheduled_at) <= datetime('now')) AND (p.repost_of='' OR p.content!='') AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=?) AND p.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?) AND p.user_id NOT IN (SELECT muted_id FROM mutes WHERE muter_id=?) ORDER BY ${orderBy} LIMIT ? OFFSET ?`,[req.uid,req.uid,req.uid,req.uid,req.uid,lim,off]);
+    else posts=all(`SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type FROM posts p JOIN users u ON p.user_id=u.id WHERE p.archived=0 AND (p.scheduled_at IS NULL OR datetime(p.scheduled_at) <= datetime('now')) AND (p.repost_of='' OR p.content!='') ORDER BY ${orderBy} LIMIT ? OFFSET ?`,[lim,off]);
     res.json(enrich(posts,req.uid));
   });
   app.get('/api/discover', auth, (req, res) => {
     const lim=Math.min(+req.query.limit||30,50), off=+req.query.offset||0;
+    const sort = String(req.query.sort || 'fresh').toLowerCase();
+    const orderBy = sort === 'hot'
+      ? `score DESC, p.created_at DESC`
+      : `p.created_at DESC`;
     // exclude private accounts (unless following), blocked users, and users who blocked you
     const posts = all(`
-      SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type
+      SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type,
+        ((SELECT COUNT(*) FROM likes WHERE post_id=p.id) +
+         (SELECT COUNT(*) FROM comments WHERE post_id=p.id) +
+         (SELECT COUNT(*) FROM post_reactions WHERE post_id=p.id)) AS score
       FROM posts p JOIN users u ON p.user_id=u.id
       WHERE p.archived=0 AND (p.repost_of='' OR p.content!='')
         AND (p.scheduled_at IS NULL OR datetime(p.scheduled_at) <= datetime('now'))
@@ -1225,10 +1292,157 @@ function main() {
         AND p.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?)
         AND p.user_id NOT IN (SELECT muted_id FROM mutes WHERE muter_id=?)
         AND u.banned_at IS NULL
-      ORDER BY p.created_at DESC LIMIT ? OFFSET ?
+      ORDER BY ${orderBy} LIMIT ? OFFSET ?
     `, [req.uid, req.uid, req.uid, req.uid, req.uid, lim, off]);
     res.json(enrich(posts, req.uid));
   });
+
+  app.get('/api/social/overview', auth, (req, res) => {
+    const u = get(`SELECT id,username,display_name,bio,avatar,link_sc,link_ig,link_tg,link_spotify,link_site,is_private,email_verified
+      FROM users WHERE id=?`, [req.uid]);
+    const stats = {
+      posts: get('SELECT COUNT(*) AS c FROM posts WHERE user_id=? AND archived=0', [req.uid]).c,
+      drops: get("SELECT COUNT(*) AS c FROM drops WHERE user_id=? AND datetime(created_at)>datetime('now','-24 hours')", [req.uid]).c,
+      followers: get('SELECT COUNT(*) AS c FROM follows WHERE following_id=?', [req.uid]).c,
+      following: get('SELECT COUNT(*) AS c FROM follows WHERE follower_id=?', [req.uid]).c,
+      unread_chats: get('SELECT COUNT(DISTINCT m.conv_id) AS c FROM messages m JOIN conversation_members cm ON cm.conv_id=m.conv_id AND cm.user_id=? WHERE m.sender_id!=? AND m.created_at>cm.last_read AND m.deleted_at IS NULL', [req.uid, req.uid]).c,
+      notifications: get('SELECT COUNT(*) AS c FROM notifications WHERE user_id=? AND seen=0', [req.uid]).c,
+    };
+    const suggestions = all(`
+      SELECT u.id,u.username,u.display_name,u.avatar,u.bio,u.is_verified,u.badge_type,
+        (SELECT COUNT(*) FROM follows f WHERE f.following_id=u.id) AS followers,
+        (SELECT COUNT(*) FROM follows mf WHERE mf.following_id=u.id AND mf.follower_id IN (SELECT following_id FROM follows WHERE follower_id=?)) AS mutuals
+      FROM users u
+      WHERE u.id!=? AND u.banned_at IS NULL AND u.email_verified=1
+        AND u.id NOT IN (SELECT following_id FROM follows WHERE follower_id=?)
+        AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=?)
+        AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?)
+      ORDER BY mutuals DESC, followers DESC, u.created_at DESC
+      LIMIT 6
+    `, [req.uid, req.uid, req.uid, req.uid, req.uid]);
+    const hotPosts = all(`
+      SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type,
+        ((SELECT COUNT(*) FROM likes WHERE post_id=p.id) + (SELECT COUNT(*) FROM comments WHERE post_id=p.id) + (SELECT COUNT(*) FROM post_reactions WHERE post_id=p.id)) AS score
+      FROM posts p JOIN users u ON u.id=p.user_id
+      WHERE p.archived=0 AND (p.scheduled_at IS NULL OR datetime(p.scheduled_at) <= datetime('now'))
+        AND (u.is_private=0 OR p.user_id=? OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=?))
+        AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=?)
+        AND p.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?)
+      ORDER BY score DESC, p.created_at DESC
+      LIMIT 5
+    `, [req.uid, req.uid, req.uid, req.uid]);
+    const recentText = all(`
+      SELECT content FROM posts p JOIN users u ON u.id=p.user_id
+      WHERE p.archived=0 AND p.content LIKE '%#%' AND u.banned_at IS NULL
+      ORDER BY p.created_at DESC LIMIT 80
+    `);
+    const tagCounts = {};
+    recentText.forEach(row => {
+      String(row.content || '').match(/#[\p{L}\p{N}_]{2,32}/gu)?.forEach(tag => {
+        const key = tag.toLowerCase();
+        tagCounts[key] = (tagCounts[key] || 0) + 1;
+      });
+    });
+    const trending_tags = Object.entries(tagCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([tag, count]) => ({ tag, count }));
+    const activeDrops = all(`
+      SELECT d.id,d.content,d.image,d.created_at,d.expires_at,u.username,u.display_name,u.avatar,
+        (SELECT COUNT(*) FROM drop_views WHERE drop_id=d.id) AS view_count
+      FROM drops d JOIN users u ON u.id=d.user_id
+      WHERE datetime(d.created_at)>datetime('now','-24 hours')
+        AND (d.user_id=? OR d.user_id IN (SELECT following_id FROM follows WHERE follower_id=?))
+      ORDER BY d.created_at DESC LIMIT 4
+    `, [req.uid, req.uid]);
+    const completion = [
+      !!u.avatar,
+      !!u.bio,
+      !!(u.link_sc || u.link_ig || u.link_tg || u.link_spotify || u.link_site),
+      stats.following >= 3,
+      stats.posts > 0,
+      stats.drops > 0,
+    ].filter(Boolean).length;
+    res.json({
+      stats,
+      onboarding: {
+        completion,
+        total: 6,
+        steps: [
+          { id: 'avatar', done: !!u.avatar, label: 'add avatar' },
+          { id: 'bio', done: !!u.bio, label: 'write bio' },
+          { id: 'links', done: !!(u.link_sc || u.link_ig || u.link_tg || u.link_spotify || u.link_site), label: 'add links' },
+          { id: 'follow', done: stats.following >= 3, label: 'follow 3 people' },
+          { id: 'post', done: stats.posts > 0, label: 'make first post' },
+          { id: 'drop', done: stats.drops > 0, label: 'publish a drop' },
+        ],
+      },
+      suggestions,
+      trending_tags,
+      hot_posts: enrich(hotPosts, req.uid),
+      active_drops: activeDrops,
+    });
+  });
+
+  app.get('/api/explore/overview', auth, (req, res) => {
+    const hotPosts = all(`
+      SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type,
+        ((SELECT COUNT(*) FROM likes WHERE post_id=p.id) * 2 +
+         (SELECT COUNT(*) FROM comments WHERE post_id=p.id) * 3 +
+         (SELECT COUNT(*) FROM post_reactions WHERE post_id=p.id) * 2 +
+         (SELECT COUNT(*) FROM bookmarks WHERE post_id=p.id)) AS score
+      FROM posts p JOIN users u ON u.id=p.user_id
+      WHERE p.archived=0 AND (p.repost_of='' OR p.content!='')
+        AND (p.scheduled_at IS NULL OR datetime(p.scheduled_at) <= datetime('now'))
+        AND (u.is_private=0 OR p.user_id=? OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=?))
+        AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=?)
+        AND p.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?)
+        AND p.user_id NOT IN (SELECT muted_id FROM mutes WHERE muter_id=?)
+        AND u.banned_at IS NULL
+      ORDER BY score DESC, p.created_at DESC
+      LIMIT 10
+    `, [req.uid, req.uid, req.uid, req.uid, req.uid]);
+    const creators = all(`
+      SELECT u.id,u.username,u.display_name,u.avatar,u.bio,u.is_verified,u.badge_type,
+        (SELECT COUNT(*) FROM follows WHERE following_id=u.id) AS followers,
+        (SELECT COUNT(*) FROM posts WHERE user_id=u.id AND archived=0) AS posts,
+        (SELECT COUNT(*) FROM drops WHERE user_id=u.id AND datetime(created_at)>datetime('now','-24 hours')) AS drops,
+        (SELECT COUNT(*) FROM follows mf WHERE mf.following_id=u.id AND mf.follower_id IN (SELECT following_id FROM follows WHERE follower_id=?)) AS mutuals
+      FROM users u
+      WHERE u.id!=? AND u.banned_at IS NULL AND u.email_verified=1
+        AND (u.is_private=0 OR u.id IN (SELECT following_id FROM follows WHERE follower_id=?))
+        AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=?)
+        AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?)
+      ORDER BY drops DESC, mutuals DESC, followers DESC, posts DESC
+      LIMIT 8
+    `, [req.uid, req.uid, req.uid, req.uid, req.uid]);
+    const files = all(`
+      SELECT df.id,df.name,df.mime,df.size,df.description,df.public_token,df.created_at,
+             u.username,u.display_name,u.avatar
+      FROM disk_files df JOIN users u ON u.id=df.user_id
+      WHERE df.public_token IS NOT NULL AND df.public_token!=''
+        AND u.banned_at IS NULL
+        AND (u.is_private=0 OR df.user_id=? OR df.user_id IN (SELECT following_id FROM follows WHERE follower_id=?))
+        AND df.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=?)
+        AND df.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?)
+      ORDER BY df.created_at DESC LIMIT 8
+    `, [req.uid, req.uid, req.uid, req.uid]);
+    const recentText = all(`
+      SELECT content FROM posts p JOIN users u ON u.id=p.user_id
+      WHERE p.archived=0 AND p.content LIKE '%#%' AND u.banned_at IS NULL
+      ORDER BY p.created_at DESC LIMIT 120
+    `);
+    const tagCounts = {};
+    recentText.forEach(row => {
+      String(row.content || '').match(/#[\p{L}\p{N}_]{2,32}/gu)?.forEach(tag => {
+        const key = tag.toLowerCase();
+        tagCounts[key] = (tagCounts[key] || 0) + 1;
+      });
+    });
+    const tags = Object.entries(tagCounts).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([tag,count])=>({tag,count}));
+    res.json({ hot_posts: enrich(hotPosts, req.uid), creators, files, tags });
+  });
+
   app.get('/api/user/:u/posts', oAuth, (req, res) => {
     const u=get('SELECT id,is_private,pinned_post_id FROM users WHERE username=?',[req.params.u]);
     if (!u) return res.status(404).json({ error:'nf' });
@@ -1255,13 +1469,98 @@ function main() {
     res.json(enriched);
   });
 
+  app.get('/api/user/:u/drops', oAuth, (req, res) => {
+    const u=get('SELECT id,is_private FROM users WHERE username=?',[req.params.u]);
+    if (!u) return res.status(404).json({ error:'nf' });
+    if (u.is_private && req.uid!==u.id) {
+      const following=req.uid?!!get('SELECT 1 FROM follows WHERE follower_id=? AND following_id=?',[req.uid,u.id]):false;
+      if (!following) return res.json([]);
+    }
+    if (req.uid && req.uid !== u.id) {
+      const blocked = get('SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)', [req.uid, u.id, u.id, req.uid]);
+      if (blocked) return res.json([]);
+    }
+    const drops=all(`SELECT d.*,u.username,u.display_name,u.avatar,
+        (SELECT COUNT(*) FROM drop_views WHERE drop_id=d.id) AS view_count,
+        (SELECT COUNT(*) FROM drop_views WHERE drop_id=d.id AND user_id=?) AS viewed
+      FROM drops d JOIN users u ON u.id=d.user_id
+      WHERE d.user_id=? AND datetime(d.created_at)>datetime('now','-24 hours')
+      ORDER BY d.created_at DESC LIMIT 24`,[req.uid || '',u.id]);
+    res.json(drops);
+  });
+
+  app.get('/api/user/:u/public-files', oAuth, (req, res) => {
+    const u=get('SELECT id,is_private FROM users WHERE username=?',[req.params.u]);
+    if (!u) return res.status(404).json({ error:'nf' });
+    if (u.is_private && req.uid!==u.id) {
+      const following=req.uid?!!get('SELECT 1 FROM follows WHERE follower_id=? AND following_id=?',[req.uid,u.id]):false;
+      if (!following) return res.json([]);
+    }
+    if (req.uid && req.uid !== u.id) {
+      const blocked = get('SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)', [req.uid, u.id, u.id, req.uid]);
+      if (blocked) return res.json([]);
+    }
+    const files=all(`SELECT id,name,mime,size,description,public_token,created_at,preview_path
+      FROM disk_files
+      WHERE user_id=? AND public_token IS NOT NULL AND public_token!=''
+      ORDER BY created_at DESC LIMIT 24`,[u.id]);
+    res.json(files);
+  });
+
+  app.get('/api/user/:u/showcase', oAuth, (req, res) => {
+    const u=get('SELECT id,is_private,pinned_post_id FROM users WHERE username=?',[req.params.u]);
+    if (!u) return res.status(404).json({ error:'nf' });
+    if (u.is_private && req.uid!==u.id) {
+      const following=req.uid?!!get('SELECT 1 FROM follows WHERE follower_id=? AND following_id=?',[req.uid,u.id]):false;
+      if (!following) return res.json({ private:true });
+    }
+    if (req.uid && req.uid !== u.id) {
+      const blocked = get('SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)', [req.uid, u.id, u.id, req.uid]);
+      if (blocked) return res.json({ private:true });
+    }
+    const pinned = u.pinned_post_id ? get(`
+      SELECT p.*,usr.username,usr.display_name,usr.avatar,usr.is_verified,usr.badge_type
+      FROM posts p JOIN users usr ON usr.id=p.user_id
+      WHERE p.id=? AND p.archived=0`, [u.pinned_post_id]) : null;
+    const topPost = get(`
+      SELECT p.*,usr.username,usr.display_name,usr.avatar,usr.is_verified,usr.badge_type,
+        ((SELECT COUNT(*) FROM likes WHERE post_id=p.id) + (SELECT COUNT(*) FROM comments WHERE post_id=p.id) * 2 + (SELECT COUNT(*) FROM post_reactions WHERE post_id=p.id)) AS score
+      FROM posts p JOIN users usr ON usr.id=p.user_id
+      WHERE p.user_id=? AND p.archived=0
+      ORDER BY score DESC, p.created_at DESC LIMIT 1`, [u.id]);
+    const drop = get(`SELECT d.*,usr.username,usr.display_name,usr.avatar,
+        (SELECT COUNT(*) FROM drop_views WHERE drop_id=d.id) AS view_count,
+        (SELECT COUNT(*) FROM drop_views WHERE drop_id=d.id AND user_id=?) AS viewed
+      FROM drops d JOIN users usr ON usr.id=d.user_id
+      WHERE d.user_id=? AND datetime(d.created_at)>datetime('now','-24 hours')
+      ORDER BY d.created_at DESC LIMIT 1`, [req.uid || '', u.id]);
+    const file = get(`SELECT id,name,mime,size,description,public_token,created_at,preview_path
+      FROM disk_files
+      WHERE user_id=? AND public_token IS NOT NULL AND public_token!=''
+      ORDER BY created_at DESC LIMIT 1`, [u.id]);
+    const mutuals = req.uid ? all(`
+      SELECT u.username,u.display_name,u.avatar
+      FROM follows mine
+      JOIN follows theirs ON theirs.follower_id=? AND theirs.following_id=mine.following_id
+      JOIN users u ON u.id=mine.following_id
+      WHERE mine.follower_id=? AND u.banned_at IS NULL
+      LIMIT 5`, [u.id, req.uid]) : [];
+    res.json({
+      pinned_post: pinned ? enrich([pinned], req.uid)[0] : null,
+      top_post: topPost ? enrich([topPost], req.uid)[0] : null,
+      latest_drop: drop || null,
+      featured_file: file || null,
+      mutuals,
+    });
+  });
+
   // LIKES
   app.post('/api/posts/:id/like', auth, (req, res) => {
     try {
       run('INSERT INTO likes (user_id,post_id) VALUES(?,?)',[req.uid,req.params.id]);
       const po=get('SELECT user_id FROM posts WHERE id=?',[req.params.id]);
       if (po) { notify(po.user_id,req.uid,'like',req.params.id); pushEvent(po.user_id,'notif',{type:'like',ref:req.params.id}); }
-    } catch {}
+    } catch (e) { logger.debug({ post_id: req.params.id, error: e.message }, 'like notification failed'); }
     res.json({ likes:get('SELECT COUNT(*) AS c FROM likes WHERE post_id=?',[req.params.id]).c });
   });
   app.delete('/api/posts/:id/like', auth, (req, res) => {
@@ -1300,7 +1599,7 @@ function main() {
       run('DELETE FROM bookmarks WHERE user_id=? AND post_id=?', [req.uid, req.params.id]);
       res.json({ bookmarked: false });
     } else {
-      try { run('INSERT INTO bookmarks (user_id,post_id) VALUES(?,?)', [req.uid, req.params.id]); } catch {}
+      try { run('INSERT INTO bookmarks (user_id,post_id) VALUES(?,?)', [req.uid, req.params.id]); } catch (e) { logger.debug({ post_id: req.params.id, error: e.message }, 'bookmark insert failed'); }
       res.json({ bookmarked: true });
     }
   });
@@ -1354,22 +1653,72 @@ function main() {
     if (req.uid && req.uid !== po.author_id) {
       if (get('SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)',[req.uid,po.author_id,po.author_id,req.uid])) return res.status(403).json({ error:'blocked' });
     }
-    res.json(all('SELECT c.*,u.username,u.display_name,u.avatar FROM comments c JOIN users u ON c.user_id=u.id WHERE c.post_id=? ORDER BY c.created_at ASC',[req.params.id]));
+    const rows = all(`
+      SELECT c.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type,
+        (SELECT COUNT(*) FROM comment_likes WHERE comment_id=c.id) AS likes,
+        (SELECT COUNT(*) FROM comment_likes WHERE comment_id=c.id AND user_id=?) AS liked,
+        (SELECT COUNT(*) FROM comments r WHERE r.parent_id=c.id) AS replies
+      FROM comments c JOIN users u ON c.user_id=u.id
+      WHERE c.post_id=?
+      ORDER BY CASE WHEN IFNULL(c.parent_id,'')='' THEN c.created_at ELSE (SELECT created_at FROM comments p WHERE p.id=c.parent_id) END ASC,
+               IFNULL(c.parent_id,''), c.created_at ASC
+    `,[req.uid || '', req.params.id]);
+    res.json(rows);
   });
   app.post('/api/posts/:id/comments', auth, limiterComment, (req, res) => {
     const c=(req.body.content||'').trim();
+    const parentId=(req.body.parent_id||'').trim();
     if (!c) return res.status(400).json({ error:'empty' });
     if (c.length > 1000) return res.status(400).json({ error:'Максимум 1000 символов' });
+    const po=get('SELECT p.user_id,u.is_private FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=? AND p.archived=0',[req.params.id]);
+    if (!po) return res.status(404).json({ error:'not found' });
+    if (po.is_private && req.uid !== po.user_id) {
+      const following = !!get('SELECT 1 FROM follows WHERE follower_id=? AND following_id=?',[req.uid, po.user_id]);
+      if (!following) return res.status(403).json({ error:'private' });
+    }
+    let parent = null;
+    if (parentId) {
+      parent = get('SELECT id,user_id FROM comments WHERE id=? AND post_id=?', [parentId, req.params.id]);
+      if (!parent) return res.status(400).json({ error:'bad parent' });
+    }
     const id=uuidv4();
-    run('INSERT INTO comments (id,post_id,user_id,content) VALUES(?,?,?,?)',[id,req.params.id,req.uid,c]);
-    const po=get('SELECT user_id FROM posts WHERE id=?',[req.params.id]);
-    if (po) { notify(po.user_id,req.uid,'comment',req.params.id); pushEvent(po.user_id,'notif',{type:'comment',ref:req.params.id}); }
+    run('INSERT INTO comments (id,post_id,user_id,content,parent_id) VALUES(?,?,?,?,?)',[id,req.params.id,req.uid,c,parentId]);
+    if (parent && parent.user_id !== req.uid) {
+      notify(parent.user_id,req.uid,'comment_reply',req.params.id);
+      pushEvent(parent.user_id,'notif',{type:'comment_reply',ref:req.params.id});
+    } else if (po.user_id !== req.uid) {
+      notify(po.user_id,req.uid,'comment',req.params.id);
+      pushEvent(po.user_id,'notif',{type:'comment',ref:req.params.id});
+    }
+    const mentioned = [...new Set((c.match(/@([a-zA-Z0-9_]{1,32})/g) || []).map(x => x.slice(1).toLowerCase()))];
+    mentioned.slice(0, 8).forEach(username => {
+      const mu = get('SELECT id FROM users WHERE LOWER(username)=LOWER(?) AND id!=?', [username, req.uid]);
+      if (mu) { notify(mu.id, req.uid, 'mention', req.params.id); pushEvent(mu.id, 'notif', { type:'mention', ref:req.params.id }); }
+    });
     res.json({ ok:1, id });
+  });
+  app.post('/api/comments/:id/like', auth, (req, res) => {
+    const c = get('SELECT c.id,c.user_id,c.post_id FROM comments c WHERE c.id=?', [req.params.id]);
+    if (!c) return res.status(404).json({ error:'not found' });
+    try { run('INSERT INTO comment_likes (comment_id,user_id) VALUES(?,?)',[req.params.id,req.uid]); } catch {}
+    if (c.user_id !== req.uid) { notify(c.user_id, req.uid, 'comment_like', c.post_id); pushEvent(c.user_id, 'notif', { type:'comment_like', ref:c.post_id }); }
+    res.json({ likes:get('SELECT COUNT(*) AS c FROM comment_likes WHERE comment_id=?',[req.params.id]).c });
+  });
+  app.delete('/api/comments/:id/like', auth, (req, res) => {
+    run('DELETE FROM comment_likes WHERE comment_id=? AND user_id=?',[req.params.id,req.uid]);
+    res.json({ likes:get('SELECT COUNT(*) AS c FROM comment_likes WHERE comment_id=?',[req.params.id]).c });
   });
 
   // NOTIFICATIONS
   app.get('/api/notifications', auth, (req, res) => {
-    const notifs=all(`SELECT n.*,u.username,u.display_name,u.avatar FROM notifications n JOIN users u ON n.from_id=u.id WHERE n.user_id=? ORDER BY n.created_at DESC LIMIT 50`,[req.uid]);
+    const notifs=all(`SELECT n.*,u.username,u.display_name,u.avatar,
+        p.content AS post_content,p.image AS post_image,
+        c.title AS conv_title,c.is_group
+      FROM notifications n
+      JOIN users u ON n.from_id=u.id
+      LEFT JOIN posts p ON p.id=n.ref_id
+      LEFT JOIN conversations c ON c.id=n.ref_id
+      WHERE n.user_id=? ORDER BY n.created_at DESC LIMIT 50`,[req.uid]);
     run('UPDATE notifications SET seen=1 WHERE user_id=? AND seen=0',[req.uid]);
     // Sync badge reset to all other open tabs/devices
     pushEvent(req.uid, 'notifs_read', {});
@@ -1533,7 +1882,8 @@ function main() {
         site: site.slice(0, 100),
         url
       });
-    } catch {
+    } catch (e) {
+      logger.debug({ url, error: e.message }, 'link preview fetch failed');
       res.status(200).json({});
     }
   });
@@ -1550,10 +1900,11 @@ function main() {
       try {
         const nm = await processImage(req.file.path, IMG_DIR, { width: 1200, fit: 'inside' });
         image = '/images/' + nm;
-      } catch {
+      } catch (e) {
+        logger.debug({ path: req.file.path, error: e.message }, 'drop image processing failed, using fallback');
         const ext = p.extname(req.file.originalname) || '.jpg';
         const nm = uuidv4() + ext;
-        try { fs.renameSync(req.file.path, p.join(IMG_DIR, nm)); } catch {}
+        try { fs.renameSync(req.file.path, p.join(IMG_DIR, nm)); } catch (e2) { logger.debug({ path: req.file.path, error: e2.message }, 'failed to rename drop image'); }
         image = '/images/' + nm;
       }
     }
@@ -1564,13 +1915,13 @@ function main() {
   });
   app.delete('/api/drops/:id', auth, (req, res) => {
     const d = get('SELECT image FROM drops WHERE id=? AND user_id=?', [req.params.id, req.uid]);
-    if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch {}
+    if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch (e) { logger.debug({ image: d.image, error: e.message }, 'failed to delete user drop image'); }
     run('DELETE FROM drops WHERE id=? AND user_id=?',[req.params.id,req.uid]); res.json({ ok:1 });
   });
   app.post('/api/drops/:id/view', auth, (req, res) => {
     const drop = get('SELECT user_id FROM drops WHERE id=?',[req.params.id]);
     if (drop && drop.user_id !== req.uid) {
-      try { run('INSERT INTO drop_views (drop_id,user_id) VALUES(?,?)',[req.params.id,req.uid]); } catch {}
+      try { run('INSERT INTO drop_views (drop_id,user_id) VALUES(?,?)',[req.params.id,req.uid]); } catch (e) { logger.debug({ drop_id: req.params.id, error: e.message }, 'failed to record drop view'); }
     }
     res.json({ ok:1 });
   });
@@ -1722,7 +2073,7 @@ function main() {
       logger.error(e, 'group avatar failed');
       const ext = p.extname(req.file.originalname) || '.jpg';
       const nm = uuidv4() + ext;
-      try { fs.renameSync(req.file.path, p.join(AVA_DIR, nm)); } catch {}
+      try { fs.renameSync(req.file.path, p.join(AVA_DIR, nm)); } catch (e2) { logger.debug({ path: req.file.path, error: e2.message }, 'failed to rename group avatar'); }
       const avatar = '/avatars/' + nm;
       run('UPDATE conversations SET avatar=? WHERE id=?', [avatar, cid]);
       res.json({ ok: 1, avatar });
@@ -1755,10 +2106,10 @@ function main() {
       return res.status(403).json({ error:'forbidden' });
     const body = req.body || {};
     if (Object.prototype.hasOwnProperty.call(body, 'pinned')) {
-      run("UPDATE conversation_members SET pinned_at=? WHERE conv_id=? AND user_id=?", [body.pinned ? new Date().toISOString() : null, cid, req.uid]);
+      run('UPDATE conversation_members SET pinned_at=? WHERE conv_id=? AND user_id=?', [body.pinned ? new Date().toISOString() : null, cid, req.uid]);
     }
     if (Object.prototype.hasOwnProperty.call(body, 'archived')) {
-      run("UPDATE conversation_members SET archived_at=? WHERE conv_id=? AND user_id=?", [body.archived ? new Date().toISOString() : null, cid, req.uid]);
+      run('UPDATE conversation_members SET archived_at=? WHERE conv_id=? AND user_id=?', [body.archived ? new Date().toISOString() : null, cid, req.uid]);
     }
     const row = get('SELECT pinned_at,archived_at FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]);
     res.json({ ok:1, pinned_at: row?.pinned_at || null, archived_at: row?.archived_at || null });
@@ -1879,7 +2230,7 @@ function main() {
     if (!text&&!file) return res.status(400).json({ error:'empty' });
     const id=uuidv4();
     run('INSERT INTO messages (id,conv_id,sender_id,content,file,file_type,file_size,file_name,reply_to,reply_text) VALUES(?,?,?,?,?,?,?,?,?,?)',[id,cid,req.uid,text||'',file,fileType,fileSize,fileName,reply_to,reply_text]);
-    run("UPDATE conversation_members SET last_read=datetime('now') WHERE conv_id=? AND user_id=?",[cid,req.uid]);
+    run('UPDATE conversation_members SET last_read=datetime(\'now\') WHERE conv_id=? AND user_id=?',[cid,req.uid]);
     const members=all('SELECT user_id FROM conversation_members WHERE conv_id=?',[cid]);
     const payload={ id,conv_id:cid,sender_id:req.uid,content:text||'',file,file_type:fileType,file_size:fileSize,reply_to,reply_text,created_at:new Date().toISOString(),reactions:[] };
     members.forEach(row=>{ if (row.user_id!==req.uid) { notify(row.user_id,req.uid,'dm',cid); pushEvent(row.user_id,'message',payload); const memRow=get('SELECT muted_until FROM conversation_members WHERE conv_id=? AND user_id=?',[cid,row.user_id]); const isMuted=memRow?.muted_until&&new Date(memRow.muted_until)>new Date(); if (!isMuted) sendPush(row.user_id, `Новое сообщение`, payload.content ? payload.content.slice(0,80) : '📎 файл', '/'); } });
@@ -1903,7 +2254,7 @@ function main() {
     if (!newText) return res.status(400).json({ error:'empty' });
     const msg=get('SELECT sender_id FROM messages WHERE id=? AND conv_id=?',[mid,cid]);
     if (!msg||msg.sender_id!==req.uid) return res.status(403).json({ error:'forbidden' });
-    run("UPDATE messages SET content=?,edited_at=datetime('now') WHERE id=?",[newText,mid]);
+    run('UPDATE messages SET content=?,edited_at=datetime(\'now\') WHERE id=?',[newText,mid]);
     const payload={ id:mid,conv_id:cid,content:newText,edited_at:new Date().toISOString() };
     all('SELECT user_id FROM conversation_members WHERE conv_id=?',[cid]).forEach(r=>pushEvent(r.user_id,'edit',payload));
     res.json({ ok:1 });
@@ -1912,7 +2263,7 @@ function main() {
     const { cid,mid }=req.params;
     const msg=get('SELECT sender_id FROM messages WHERE id=? AND conv_id=?',[mid,cid]);
     if (!msg||msg.sender_id!==req.uid) return res.status(403).json({ error:'forbidden' });
-    run("UPDATE messages SET deleted_at=datetime('now') WHERE id=?",[mid]);
+    run('UPDATE messages SET deleted_at=datetime(\'now\') WHERE id=?',[mid]);
     run('DELETE FROM message_reactions WHERE msg_id=?',[mid]);
     all('SELECT user_id FROM conversation_members WHERE conv_id=?',[cid]).forEach(r=>pushEvent(r.user_id,'delete',{id:mid,conv_id:cid}));
     res.json({ ok:1 });
@@ -1933,7 +2284,7 @@ function main() {
     const id = uuidv4();
     run('INSERT INTO messages (id,conv_id,sender_id,content,file,file_type,file_size,file_name,forwarded_from) VALUES(?,?,?,?,?,?,?,?,?)',
       [id, target_cid, req.uid, orig.content || '', orig.file || '', orig.file_type || '', orig.file_size || 0, orig.file_name || '', mid]);
-    run("UPDATE conversation_members SET last_read=datetime('now') WHERE conv_id=? AND user_id=?", [target_cid, req.uid]);
+    run('UPDATE conversation_members SET last_read=datetime(\'now\') WHERE conv_id=? AND user_id=?', [target_cid, req.uid]);
     const fwdMembers = all('SELECT user_id FROM conversation_members WHERE conv_id=?', [target_cid]);
     const payload = { id, conv_id: target_cid, sender_id: req.uid, content: orig.content || '', file: orig.file || '', file_type: orig.file_type || '', file_size: orig.file_size || 0, forwarded_from: mid, created_at: new Date().toISOString(), reactions: [] };
     fwdMembers.forEach(row => { if (row.user_id !== req.uid) { pushEvent(row.user_id, 'message', payload); } });
@@ -2244,7 +2595,7 @@ function main() {
           }
         }
       }
-    } catch { }
+    } catch (e) { logger.debug({ platform, error: e.message }, 'platform stats fetch failed'); }
     return null;
   }
 
@@ -2300,10 +2651,15 @@ function main() {
     const admins  = get('SELECT COUNT(*) AS c FROM users WHERE is_admin=1').c;
     const msgs    = get('SELECT COUNT(*) AS c FROM messages WHERE deleted_at IS NULL').c;
     const drops   = get("SELECT COUNT(*) AS c FROM drops WHERE datetime(created_at)>datetime('now','-24 hours')").c;
+    const posts   = get('SELECT COUNT(*) AS c FROM posts WHERE archived=0').c;
+    const comments= get('SELECT COUNT(*) AS c FROM comments').c;
+    const files   = get('SELECT COUNT(*) AS c FROM disk_files').c;
+    const publicFiles = get("SELECT COUNT(*) AS c FROM disk_files WHERE public_token IS NOT NULL AND public_token!=''").c;
+    const sessions= get('SELECT COUNT(*) AS c FROM sessions').c;
     const today   = get("SELECT COUNT(*) AS c FROM users WHERE date(created_at)=date('now')").c;
     const msgToday= get("SELECT COUNT(*) AS c FROM messages WHERE date(created_at)=date('now') AND deleted_at IS NULL").c;
     const reports = get('SELECT COUNT(*) AS c FROM reports WHERE status=\'open\'').c;
-    res.json({ users, banned, admins, msgs, drops, today, msgToday, reports });
+    res.json({ users, banned, admins, msgs, drops, posts, comments, files, publicFiles, sessions, today, msgToday, reports });
   });
 
   app.get('/api/admin/users', adminAuth, (req, res) => {
@@ -2318,6 +2674,41 @@ function main() {
     res.json(list);
   });
 
+  app.post('/api/admin/users', adminAuth, (req, res) => {
+    const username = String(req.body.username || '').trim().toLowerCase();
+    const displayName = String(req.body.display_name || username).trim();
+    const password = String(req.body.password || '').trim();
+    const isAdmin = req.body.is_admin ? 1 : 0;
+    if (!/^[a-z0-9_]{2,24}$/.test(username)) return res.status(400).json({ error:'Username 2-24: a-z, 0-9, _' });
+    if (password.length < 8) return res.status(400).json({ error:'Пароль минимум 8 символов' });
+    if (get('SELECT id FROM users WHERE LOWER(username)=LOWER(?)', [username])) return res.status(409).json({ error:'Username занят' });
+    const email = `${username}@w0pium.local`;
+    const id = uuidv4();
+    run(`INSERT INTO users (id,username,display_name,password,bio,email,email_hash,email_verified,invite_code,is_admin)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`, [
+      id, username, displayName, bcrypt.hashSync(password, 10), '',
+      encryptEmail(email), hashEmail(email), 1, genCode(), isAdmin,
+    ]);
+    res.json({ ok:1, id, username, password });
+  });
+
+  app.post('/api/admin/users/:uid/password', adminAuth, (req, res) => {
+    const uid = req.params.uid;
+    const u = get('SELECT id,username FROM users WHERE id=?', [uid]);
+    if (!u) return res.status(404).json({ error:'Не найден' });
+    const password = String(req.body.password || `${u.username}-W0PIUM-${new Date().getFullYear()}`).trim();
+    if (password.length < 8) return res.status(400).json({ error:'Пароль минимум 8 символов' });
+    run('UPDATE users SET password=?,reset_token=NULL,reset_token_exp=NULL,email_verified=1,banned_at=NULL,ban_reason=\'\' WHERE id=?', [bcrypt.hashSync(password, 10), uid]);
+    run('DELETE FROM sessions WHERE user_id=?', [uid]);
+    res.json({ ok:1, username:u.username, password });
+  });
+
+  app.delete('/api/admin/users/:uid/sessions', adminAuth, (req, res) => {
+    if (req.params.uid === req.uid) return res.status(400).json({ error:'Нельзя отозвать текущие сессии себя здесь' });
+    const info = run('DELETE FROM sessions WHERE user_id=?', [req.params.uid]);
+    res.json({ ok:1, revoked: info.changes || 0 });
+  });
+
   app.post('/api/admin/users/:uid/ban', adminAuth, (req, res) => {
     const uid = req.params.uid;
     if (uid === req.uid) return res.status(400).json({ error:'Нельзя забанить себя' });
@@ -2328,7 +2719,7 @@ function main() {
       run('UPDATE users SET banned_at=NULL,ban_reason=\'\' WHERE id=?', [uid]);
     } else {
       const reason = (req.body.reason || '').trim();
-      run("UPDATE users SET banned_at=datetime('now'),ban_reason=? WHERE id=?", [reason, uid]);
+      run('UPDATE users SET banned_at=datetime(\'now\'),ban_reason=? WHERE id=?', [reason, uid]);
       // kick active sessions
       run('DELETE FROM sessions WHERE user_id=?', [uid]);
     }
@@ -2365,7 +2756,7 @@ function main() {
 
   app.delete('/api/admin/drops/:id', adminAuth, (req, res) => {
     const d = get('SELECT image FROM drops WHERE id=?', [req.params.id]);
-    if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch {}
+    if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch (e) { logger.debug({ image: d.image, error: e.message }, 'failed to delete admin drop image'); }
     run('DELETE FROM drops WHERE id=?', [req.params.id]);
     res.json({ ok:1 });
   });
@@ -2543,8 +2934,8 @@ function main() {
     if (!f) return res.status(404).json({ error: 'Not found' });
     const u = get('SELECT is_admin FROM users WHERE id=?', [req.uid]);
     if (f.user_id !== req.uid && !u?.is_admin) return res.status(403).json({ error: 'forbidden' });
-    try { fs.unlinkSync(p.join(DATA, f.path.replace(/^\/disk\//, 'disk/'))); } catch {}
-    if (f.preview_path) try { fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch {}
+    try { fs.unlinkSync(p.join(DATA, f.path.replace(/^\/disk\//, 'disk/'))); } catch (e) { logger.debug({ path: f.path, error: e.message }, 'failed to delete disk file'); }
+    if (f.preview_path) try { fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch (e) { logger.debug({ preview: f.preview_path, error: e.message }, 'failed to delete disk preview'); }
     run('DELETE FROM disk_files WHERE id=?', [req.params.id]);
     res.json({ ok: 1 });
   });
@@ -2631,8 +3022,8 @@ function main() {
     toDelete.forEach(fid => {
       const files = all('SELECT path, preview_path FROM disk_files WHERE folder_id=?', [fid]);
       files.forEach(file => {
-        try { fs.unlinkSync(p.join(DATA, file.path.replace(/^\/disk\//, 'disk/'))); } catch {}
-        if (file.preview_path) try { fs.unlinkSync(p.join(DATA, file.preview_path.replace(/^\//, ''))); } catch {}
+        try { fs.unlinkSync(p.join(DATA, file.path.replace(/^\/disk\//, 'disk/'))); } catch (e) { logger.debug({ path: file.path, error: e.message }, 'failed to delete folder disk file'); }
+        if (file.preview_path) try { fs.unlinkSync(p.join(DATA, file.preview_path.replace(/^\//, ''))); } catch (e) { logger.debug({ preview: file.preview_path, error: e.message }, 'failed to delete folder disk preview'); }
       });
       run('DELETE FROM disk_files WHERE folder_id=?', [fid]);
       run('DELETE FROM disk_folders WHERE id=?', [fid]);
@@ -2664,7 +3055,7 @@ function main() {
     arc.pipe(res);
     files.forEach(f => {
       const filePath = p.join(DATA, f.path.replace(/^\/disk\//, 'disk/'));
-      try { if (fs.existsSync(filePath)) arc.file(filePath, { name: f.name }); } catch {}
+      try { if (fs.existsSync(filePath)) arc.file(filePath, { name: f.name }); } catch (e) { logger.debug({ path: filePath, error: e.message }, 'ZIP add file failed'); }
     });
     arc.finalize();
   });
@@ -2698,9 +3089,70 @@ function main() {
     res.sendFile(filePath, err => { if (err && !res.headersSent) res.status(404).send('Not found'); });
   });
 
+  app.get('/post/:id', (req, res) => {
+    const po = get(`SELECT p.id,p.content,p.image,p.created_at,u.username,u.display_name
+      FROM posts p JOIN users u ON u.id=p.user_id
+      WHERE p.id=? AND p.archived=0 AND u.is_private=0 AND u.banned_at IS NULL`, [req.params.id]);
+    if (!po) return res.status(404).send('Not found');
+    const origin = process.env.PUBLIC_ORIGIN || `${req.protocol}://${req.get('host')}`;
+    res.send(publicShareHtml({
+      title: `${po.display_name} on W0PIUM`,
+      description: po.content || 'W0PIUM post',
+      image: po.image || '',
+      url: `${origin}/profile/${encodeURIComponent(po.username)}`,
+      type: 'article',
+    }));
+  });
+
+  app.get('/u/:username', (req, res) => {
+    const u = get(`SELECT username,display_name,bio,avatar FROM users WHERE username=? AND is_private=0 AND banned_at IS NULL`, [req.params.username]);
+    if (!u) return res.status(404).send('Not found');
+    const origin = process.env.PUBLIC_ORIGIN || `${req.protocol}://${req.get('host')}`;
+    res.send(publicShareHtml({
+      title: `${u.display_name} (@${u.username}) on W0PIUM`,
+      description: u.bio || 'W0PIUM profile',
+      image: u.avatar || '',
+      url: `${origin}/profile/${encodeURIComponent(u.username)}`,
+      type: 'profile',
+    }));
+  });
+
+  app.get('/drop/:id', (req, res) => {
+    const d = get(`SELECT d.id,d.content,d.image,d.created_at,u.username,u.display_name
+      FROM drops d JOIN users u ON u.id=d.user_id
+      WHERE d.id=? AND u.is_private=0 AND u.banned_at IS NULL`, [req.params.id]);
+    if (!d) return res.status(404).send('Not found');
+    const origin = process.env.PUBLIC_ORIGIN || `${req.protocol}://${req.get('host')}`;
+    res.send(publicShareHtml({
+      title: `${d.display_name}'s Drop on W0PIUM`,
+      description: d.content || '24h W0PIUM drop',
+      image: d.image || '',
+      url: `${origin}/profile/${encodeURIComponent(d.username)}`,
+      type: 'article',
+    }));
+  });
+
   app.use('/disk', auth, express.static(DISK_DIR));
 
-  app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), build: 'ui-audit-artists-bookmarks' }));
+  app.get('/api/health', (req, res) => {
+    let db = 'unknown';
+    let social_schema = false;
+    try {
+      db = get('PRAGMA integrity_check').integrity_check;
+      social_schema = !!get("SELECT 1 FROM pragma_table_info('comments') WHERE name='parent_id'")
+        && !!get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='comment_likes'");
+    } catch (e) {
+      db = e.message;
+    }
+    res.json({
+      ok: true,
+      uptime: process.uptime(),
+      build: 'ui-polish-2.3',
+      app_version: '0.9.20',
+      db,
+      social_schema,
+    });
+  });
 
   app.get('*', (req,res) => res.sendFile(p.join(__dirname,'public','index.html')));
   // Global error handler — never expose stack traces to clients

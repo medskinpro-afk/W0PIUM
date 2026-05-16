@@ -1,19 +1,25 @@
 // ── VERSION ──
-const APP_VERSION = '0.9.16';
+const APP_VERSION = '0.9.19';
 
 // ── IMAGE LIGHTBOX ──
 function openImg(src) {
   const lb = document.createElement('div');
   lb.id = 'lightbox';
-  lb.innerHTML = `<div class="lb-backdrop"></div><img class="lb-img" src="${src}" alt="">`;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'lb-backdrop';
+  const img = document.createElement('img');
+  img.className = 'lb-img';
+  img.alt = '';
+  img.src = src;
+  lb.append(backdrop, img);
   document.body.appendChild(lb);
   requestAnimationFrame(() => lb.classList.add('lb-in'));
   const close = () => {
     lb.classList.remove('lb-in');
     lb.addEventListener('transitionend', () => lb.remove(), { once: true });
   };
-  lb.querySelector('.lb-backdrop').addEventListener('click', close);
-  lb.querySelector('.lb-img').addEventListener('click', e => e.stopPropagation());
+  backdrop.addEventListener('click', close);
+  img.addEventListener('click', e => e.stopPropagation());
   document.addEventListener('keydown', function esc(e) {
     if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
   });
@@ -168,7 +174,7 @@ function opiumCommandStrip(active = '') {
 }
 
 function opiumMetricCards(cards) {
-  return `<div class="opium-metric-grid">${cards.map(c => `
+  return `<div class="opium-metric-grid" data-count="${cards.length}">${cards.map(c => `
     <div class="opium-metric-card">
       <span>${esc(c.label)}</span>
       <strong>${esc(String(c.value))}</strong>
@@ -211,10 +217,10 @@ const CHAT_VIRTUAL_CHUNK = 120;
 try {
   pendingChatQueue = JSON.parse(localStorage.getItem('pending_chat_queue') || '[]');
   if (!Array.isArray(pendingChatQueue)) pendingChatQueue = [];
-} catch { pendingChatQueue = []; }
+} catch (e) { console.debug('pendingChatQueue parse failed:', e.message); pendingChatQueue = []; }
 
 function persistPendingChatQueue() {
-  try { localStorage.setItem('pending_chat_queue', JSON.stringify(pendingChatQueue.slice(-50))); } catch {}
+  try { localStorage.setItem('pending_chat_queue', JSON.stringify(pendingChatQueue.slice(-50))); } catch (e) { console.debug('pendingChatQueue persist failed:', e.message); }
 }
 
 function chatIsMuted(c) {
@@ -281,7 +287,7 @@ function sendMessageWithProgress(cid, formData, onProgress) {
     xhr.onerror = () => reject(new Error('Network error'));
     xhr.onload = () => {
       let data = {};
-      try { data = JSON.parse(xhr.responseText || '{}'); } catch {}
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) { console.debug('XHR response parse failed:', e.message); }
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
       else reject(new Error(data.error || 'Error'));
     };
@@ -309,6 +315,7 @@ function toggleTheme() {
 let dirtySettings = false;
 let pushSubscription = null;
 let pendingVerifyUsername = null;
+let settingsTab = localStorage.getItem('settingsTab') || 'profile';
 
 // Voice recording state
 let mediaRecorder = null;
@@ -338,6 +345,8 @@ let discOffset = 0;
 let discLimit = 20;
 let discDone = false;
 let discFetching = false;
+let discoverSort = localStorage.getItem('discoverSort') || 'fresh';
+let feedSort = localStorage.getItem('feedSort') || 'fresh';
 
 /**
  * Initialize Server-Sent Events connection for real-time chat updates.
@@ -347,7 +356,7 @@ let discFetching = false;
  */
 function initEvents() {
   if (eventSrc) {
-    try { eventSrc.close(); } catch {}
+    try { eventSrc.close(); } catch (e) { console.debug('eventSrc.close failed:', e.message); }
   }
   eventSrc = new EventSource('/api/events');
   eventSrc.onopen = () => {
@@ -509,7 +518,7 @@ async function loadChats() {
     } else {
       renderNav();
     }
-  } catch {}
+  } catch (e) { console.debug('renderChatList failed:', e.message); }
 }
 
 /**
@@ -629,7 +638,7 @@ async function submitEditMsg(mid, cid) {
     await api(`/chats/${cid}/messages/${mid}`, { method: 'PUT', body: { content } });
     updateMessage(mid, content, now);
     // SSE 'edit' also updates UI for other members
-  } catch {}
+  } catch (e) { console.debug('saveEditMsg failed:', e.message); }
 }
 
 function cancelEditMsg(mid) {
@@ -642,7 +651,7 @@ async function deleteMsg(mid, cid) {
     await api(`/chats/${cid}/messages/${mid}`, { method: 'DELETE' });
     removeMessage(mid);
     // SSE 'delete' also updates UI for other members
-  } catch {}
+  } catch (e) { console.debug('confirmDeleteMsg failed:', e.message); }
 }
 
 /**
@@ -740,7 +749,16 @@ async function api(path, opts = {}) {
   if (o.body && typeof o.body !== 'string' && !(o.body instanceof FormData)) o.body = JSON.stringify(o.body);
   if (o.body instanceof FormData) delete o.headers['Content-Type'];
   const r = await fetch('/api' + path, o);
-  const d = await r.json();
+  const text = await r.text();
+  let d = {};
+  if (text) {
+    try {
+      d = JSON.parse(text);
+    } catch (e) {
+      if (!r.ok) throw new Error(text.slice(0, 180) || r.statusText || 'Error');
+      throw new Error('Unexpected API response');
+    }
+  }
   if (!r.ok) throw new Error(d.error || 'Error');
   return d;
 }
@@ -993,6 +1011,8 @@ function initUiDelegates() {
       case 'track-play': return trackPlay(postId);
       case 'expand-post': return expandPost(postId);
       case 'send-comment': return sendCmt(postId);
+      case 'reply-comment': return startCommentReply(postActionEl.dataset.postId || '', postActionEl.dataset.commentId || '', postActionEl.dataset.username || '');
+      case 'comment-like': return toggleCommentLike(postActionEl.dataset.commentId || '', postActionEl.dataset.liked === '1', postActionEl);
       case 'cancel-edit-msg': return cancelEditMsg(postActionEl.dataset.msgId || '');
       case 'submit-edit-msg': return submitEditMsg(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '');
       case 'scroll-to-msg': return scrollToMsg(postActionEl.dataset.msgId || '');
@@ -1005,6 +1025,21 @@ function initUiDelegates() {
       case 'go-discover': return go('discover');
       case 'go-feed': return go('feed');
       case 'go': return go(postActionEl.dataset.navTarget || 'feed');
+      case 'follow-suggested': return followSuggested(postActionEl.dataset.userId || '', postActionEl);
+      case 'dismiss-social-onboarding':
+        localStorage.setItem('social_onboarding_dismissed', '1');
+        postActionEl.closest('.social-card')?.remove();
+        return;
+      case 'discover-sort':
+        discoverSort = postActionEl.dataset.sort || 'fresh';
+        localStorage.setItem('discoverSort', discoverSort);
+        return renderDiscover(document.getElementById('app'));
+      case 'feed-sort':
+        feedSort = postActionEl.dataset.sort || 'fresh';
+        localStorage.setItem('feedSort', feedSort);
+        return renderFeed(document.getElementById('app'));
+      case 'refresh-feed': return renderFeed(document.getElementById('app'));
+      case 'refresh-drops': return renderDrops(document.getElementById('app'));
       case 'open-user-info-panel': return openUserInfoPanel(postActionEl.dataset.username || '');
       case 'leave-group-chat': return leaveGroupChat(postActionEl.dataset.convId || '');
       case 'toggle-group-members': return toggleGroupMembers();
@@ -1083,6 +1118,7 @@ function initUiDelegates() {
       case 'profile-tab': return switchProfileTab(postActionEl, postActionEl.dataset.tabId || 'postsTab');
       case 'profile-avatar-pick': return document.getElementById('profileAvaFile')?.click();
       case 'settings-avatar-pick': return document.getElementById('avaFile')?.click();
+      case 'settings-tab': return switchSettingsTab(postActionEl.dataset.settingsTab || 'profile');
       case 'save-profile': return saveProfile();
       case 'do-logout': return doLogout();
       case 'rotate-invite': return rotateInvite();
@@ -1115,6 +1151,9 @@ function initUiDelegates() {
         );
       case 'admin-delete-user':
         return adminDeleteUser(postActionEl.dataset.userId || '', postActionEl.dataset.username || '');
+      case 'admin-create-user': return adminCreateUser();
+      case 'admin-reset-pass': return adminResetPass(postActionEl.dataset.userId || '', postActionEl.dataset.username || '');
+      case 'admin-revoke-sessions': return adminRevokeSessions(postActionEl.dataset.userId || '', postActionEl.dataset.username || '');
       case 'do-auth': return doAuth(postActionEl.dataset.mode || 'login');
       case 'show-forgot-step': return showForgotStep();
       case 'go-register': return go('register');
@@ -1355,7 +1394,7 @@ function go(p, param, _hist = 'push') {
     try {
       if (_hist === 'replace') history.replaceState({ p, param: param || null }, '', _url);
       else history.pushState({ p, param: param || null }, '', _url);
-    } catch {}
+    } catch (e) { console.debug('history.pushState failed:', e.message); }
   }
   $('#mobileMenu').classList.add('hidden');
   renderNav();
@@ -1756,7 +1795,7 @@ async function loadLinkPreviews(container) {
       a.appendChild(text);
       el.innerHTML = '';
       el.appendChild(a);
-    } catch {}
+    } catch (e) { console.debug('Link preview failed:', e.message); }
   }
 }
 
@@ -1978,18 +2017,135 @@ function linkifyContent(text) {
 }
 
 // ── FEED ──
+async function followSuggested(id, btn) {
+  if (!id) return;
+  const old = btn?.innerHTML || '';
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `${iconCut('check', 'ui-icon', 13, 13)}FOLLOWED`;
+    }
+    await api(`/follow/${id}`, { method:'POST' });
+    loadSocialOverview().catch(()=>{});
+  } catch (e) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = old;
+    }
+    toast.error(e.message);
+  }
+}
+
+function socialOverviewHtml(data) {
+  const o = data?.onboarding || { completion: 0, total: 6, steps: [] };
+  const pct = Math.round(((o.completion || 0) / Math.max(1, o.total || 1)) * 100);
+  const showOnboarding = pct < 100 && localStorage.getItem('social_onboarding_dismissed') !== '1';
+  const steps = (o.steps || []).map(s => `
+    <span class="social-step ${s.done ? 'done' : ''}">
+      ${iconCut(s.done ? 'check' : 'add', 'ui-icon', 11, 11)}${esc(s.label)}
+    </span>
+  `).join('');
+  const suggestions = (data?.suggestions || []).map(u => `
+    <div class="suggestion-row">
+      <div class="suggestion-person" data-post-action="go-profile" data-username="${esc(u.username)}">
+        ${avatarEl(u.avatar, 'avatar-sm', initial(u.display_name))}
+        <div>
+          <div class="suggestion-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</div>
+          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.mutuals || 0} mutual &middot; ${u.followers || 0} followers</div>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-ic-row" data-post-action="follow-suggested" data-user-id="${esc(u.id)}">${iconCut('add', 'ui-icon', 13, 13)}FOLLOW</button>
+    </div>
+  `).join('');
+  const tags = (data?.trending_tags || []).map(t => {
+    const tag = String(t.tag || '').replace(/^#/, '');
+    return `<button class="trend-chip" data-post-action="go-hashtag" data-tag="${esc(tag)}">#${esc(tag)} <span>${t.count || 0}</span></button>`;
+  }).join('');
+  const hot = (data?.hot_posts || []).slice(0, 3).map(p => `
+    <div class="mini-post" data-post-action="expand-post" data-post-id="${esc(p.id)}">
+      <div class="mini-post-top">
+        ${avatarEl(p.avatar, 'avatar-xs', initial(p.display_name))}
+        <span>${esc(p.display_name)}</span>
+        <em>${timeAgo(p.created_at)}</em>
+      </div>
+      <div class="mini-post-body">${esc((p.content || 'track / media post').slice(0, 120))}</div>
+    </div>
+  `).join('');
+  const drops = (data?.active_drops || []).map(d => `
+    <div class="drop-mini" data-post-action="go-profile" data-username="${esc(d.username)}">
+      ${avatarEl(d.avatar, 'avatar-xs', initial(d.display_name))}
+      <div><strong>${esc(d.display_name)}</strong><span>${esc((d.content || 'new drop').slice(0, 48))}</span></div>
+    </div>
+  `).join('');
+  const stats = data?.stats || {};
+  return `
+    <div class="social-overview">
+      ${showOnboarding ? `
+        <section class="social-card social-card-wide">
+          <div class="social-card-head">
+            <div><span>ЗАПУСК ПРОФИЛЯ</span><strong>${pct}% готово</strong></div>
+            <button class="icon-btn" data-post-action="dismiss-social-onboarding" title="Dismiss">${iconCut('close', 'ui-icon', 13, 13)}</button>
+          </div>
+          <div class="social-progress"><i style="width:${pct}%"></i></div>
+          <div class="social-steps">${steps}</div>
+        </section>
+      ` : ''}
+      <section class="social-card">
+        <div class="social-card-head"><div><span>DISCOVERY GRAPH</span><strong>${stats.following || 0} following</strong></div></div>
+        <div class="suggestion-list">${suggestions || '<div class="social-empty">Нет предложений</div>'}</div>
+      </section>
+      <section class="social-card">
+        <div class="social-card-head"><div><span>NETWORK SIGNAL</span><strong>${stats.notifications || 0} alerts</strong></div></div>
+        <div class="trend-chips">${tags || '<div class="social-empty">Нет трендов</div>'}</div>
+        <div class="mini-post-list">${hot || ''}</div>
+      </section>
+      <section class="social-card">
+        <div class="social-card-head"><div><span>LIVE DROPS</span><strong>${(data?.active_drops || []).length} active</strong></div></div>
+        <div class="drop-mini-list">${drops || '<div class="social-empty">Подпишись на артистов или опубликуй дроп</div>'}</div>
+      </section>
+    </div>
+  `;
+}
+
+async function loadSocialOverview() {
+  const mount = document.getElementById('socialOverview');
+  if (!mount) return;
+  try {
+    const data = await api('/social/overview');
+    mount.innerHTML = socialOverviewHtml(data);
+  } catch {
+    mount.innerHTML = '';
+  }
+}
+
 async function renderFeed(app) {
   if (!me) return go('login');
   try {
-    // Show skeleton while loading
     app.innerHTML = `
       ${opiumCommandStrip('feed')}
-      ${pageTitleIc('home', 'FEED')}
+      <div class="page-title-row">
+        <span class="page-title page-title--ic">${iconCut('home', 'ui-icon page-title-ic', 15, 15)}FEED</span>
+        <div class="page-title-actions">
+          <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="refresh-feed">${iconCut('download', 'ui-icon', 13, 13)}SYNC</button>
+          <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-discover">${iconCut('search', 'ui-icon', 13, 13)}DISCOVER</button>
+        </div>
+      </div>
+      ${opiumMetricCards([
+        { label: 'source', value: 'follow', note: 'your graph' },
+        { label: 'load', value: feedLimit, note: 'per page' },
+        { label: 'mode', value: feedSort, note: feedSort === 'ranked' ? 'engagement + freshness' : 'new posts sync' },
+      ])}
+      <div class="discover-toolbar">
+        <button class="seg-btn ${feedSort === 'fresh' ? 'active' : ''}" data-post-action="feed-sort" data-sort="fresh">${iconCut('download', 'ui-icon', 12, 12)}FRESH</button>
+        <button class="seg-btn ${feedSort === 'ranked' ? 'active' : ''}" data-post-action="feed-sort" data-sort="ranked">${iconCut('like', 'ui-icon', 12, 12)}RANKED</button>
+      </div>
+      <div id="socialOverview"><div class="social-overview">${skeletonHtml(2)}</div></div>
       ${composerHtml()}
       <div id="posts">${skeletonHtml(3)}</div>
+      <div id="feedStatus" class="feed-status hidden"></div>
     `;
-    // fetch first batch of posts with offset/limit
-    const posts = await api(`/feed?offset=0&limit=${feedLimit}`);
+    loadSocialOverview().catch(()=>{});
+    const posts = await api(`/feed?offset=0&limit=${feedLimit}&sort=${encodeURIComponent(feedSort)}`);
     const postsEl = document.getElementById('posts');
     if (postsEl) postsEl.innerHTML = posts.length ? posts.map(postHtml).join('') :
         '<div class="onboarding-empty">' +
@@ -2002,23 +2158,41 @@ async function renderFeed(app) {
     // initialise feed scroll state
     feedOffset = posts.length;
     feedDone = posts.length < feedLimit;
+    const feedStatus = document.getElementById('feedStatus');
+    if (feedStatus && feedDone && posts.length) {
+      feedStatus.textContent = 'END OF FEED';
+      feedStatus.classList.remove('hidden');
+    }
     // attach scroll listener for infinite scroll
     window.onscroll = async () => {
       if (page !== 'feed' || feedDone || feedFetching) return;
       if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 200) {
         feedFetching = true;
+        const statusEl = document.getElementById('feedStatus');
+        if (statusEl) {
+          statusEl.textContent = 'LOADING...';
+          statusEl.classList.remove('hidden');
+        }
         try {
-          const more = await api(`/feed?offset=${feedOffset}&limit=${feedLimit}`);
+          const more = await api(`/feed?offset=${feedOffset}&limit=${feedLimit}&sort=${encodeURIComponent(feedSort)}`);
           if (more && more.length) {
             const cont = document.getElementById('posts');
             cont.insertAdjacentHTML('beforeend', more.map(postHtml).join(''));
             feedOffset += more.length;
             if (more.length < feedLimit) feedDone = true;
+            loadLinkPreviews(cont).catch(()=>{});
           } else {
             feedDone = true;
           }
-        } catch { feedDone = true; }
-        finally { feedFetching = false; }
+        } catch (e) {
+          if (statusEl) statusEl.textContent = e.message || 'LOAD FAILED';
+          feedDone = true;
+        }
+        finally {
+          feedFetching = false;
+          if (statusEl && feedDone) statusEl.textContent = 'END OF FEED';
+          else if (statusEl) statusEl.classList.add('hidden');
+        }
       }
     };
     bindComposerImg();
@@ -2034,13 +2208,19 @@ async function renderDiscover(app) {
       ${pageTitleIc('search', 'DISCOVER')}
       ${opiumMetricCards([
         { label: 'mode', value: 'public', note: 'all network posts' },
-        { label: 'sort', value: 'fresh', note: 'latest signal first' },
+        { label: 'sort', value: discoverSort, note: discoverSort === 'hot' ? 'ranked by reactions' : 'latest signal first' },
         { label: 'action', value: 'react', note: 'like, save, report' },
       ])}
+      <div class="discover-toolbar">
+        <button class="seg-btn ${discoverSort === 'fresh' ? 'active' : ''}" data-post-action="discover-sort" data-sort="fresh">${iconCut('download', 'ui-icon', 12, 12)}FRESH</button>
+        <button class="seg-btn ${discoverSort === 'hot' ? 'active' : ''}" data-post-action="discover-sort" data-sort="hot">${iconCut('like', 'ui-icon', 12, 12)}HOT</button>
+      </div>
+      <div id="exploreOverview"><div class="social-overview">${skeletonHtml(2)}</div></div>
       <div id="posts">${skeletonHtml(3)}</div>
     `;
+    loadExploreOverview().catch(()=>{});
     // fetch first batch of discover posts
-    const posts = await api(`/discover?offset=0&limit=${discLimit}`);
+    const posts = await api(`/discover?offset=0&limit=${discLimit}&sort=${encodeURIComponent(discoverSort)}`);
     const postsEl = document.getElementById('posts');
     if (postsEl) postsEl.innerHTML = posts.length ? posts.map(postHtml).join('') :
         '<div class="empty">Пока нет постов. Будь первым.</div>';
@@ -2054,7 +2234,7 @@ async function renderDiscover(app) {
       if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 200) {
         discFetching = true;
         try {
-          const more = await api(`/discover?offset=${discOffset}&limit=${discLimit}`);
+          const more = await api(`/discover?offset=${discOffset}&limit=${discLimit}&sort=${encodeURIComponent(discoverSort)}`);
           if (more && more.length) {
             const cont = document.getElementById('posts');
             cont.insertAdjacentHTML('beforeend', more.map(postHtml).join(''));
@@ -2068,6 +2248,57 @@ async function renderDiscover(app) {
       }
     };
   } catch (e) { app.innerHTML = `<div class="empty">${e.message}</div>`; }
+}
+
+function exploreOverviewHtml(data) {
+  const creators = (data?.creators || []).map(u => `
+    <div class="suggestion-row">
+      <div class="suggestion-person" data-post-action="go-profile" data-username="${esc(u.username)}">
+        ${avatarEl(u.avatar, 'avatar-sm', initial(u.display_name))}
+        <div>
+          <div class="suggestion-name">${esc(u.display_name)}${verifiedBadge(u.is_verified, u.badge_type)}</div>
+          <div class="suggestion-meta">@${esc(u.username)} &middot; ${u.followers || 0} followers &middot; ${u.posts || 0} posts</div>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-profile" data-username="${esc(u.username)}">${iconCut('profile', 'ui-icon', 13, 13)}VIEW</button>
+    </div>
+  `).join('');
+  const files = (data?.files || []).map(f => `
+    <a class="profile-file-row" href="/pub/${esc(f.public_token)}" target="_blank" rel="noopener">
+      <span class="profile-file-ic">${iconCut((f.mime || '').startsWith('image/') ? 'media' : 'download', 'ui-icon', 14, 14)}</span>
+      <span class="profile-file-main"><strong>${esc(f.name)}</strong><small>@${esc(f.username)} &middot; ${fmtBytes(f.size || 0)}</small></span>
+    </a>
+  `).join('');
+  const tags = (data?.tags || []).map(t => {
+    const tag = String(t.tag || '').replace(/^#/, '');
+    return `<button class="trend-chip" data-post-action="go-hashtag" data-tag="${esc(tag)}">#${esc(tag)} <span>${t.count || 0}</span></button>`;
+  }).join('');
+  return `
+    <div class="social-overview explore-overview">
+      <section class="social-card">
+        <div class="social-card-head"><div><span>CREATORS</span><strong>people moving</strong></div></div>
+        <div class="suggestion-list">${creators || '<div class="social-empty">No creators yet</div>'}</div>
+      </section>
+      <section class="social-card">
+        <div class="social-card-head"><div><span>TAGS</span><strong>conversation map</strong></div></div>
+        <div class="trend-chips">${tags || '<div class="social-empty">Нет тегов</div>'}</div>
+      </section>
+      <section class="social-card">
+        <div class="social-card-head"><div><span>PUBLIC DISK</span><strong>shared files</strong></div></div>
+        <div class="profile-file-list">${files || '<div class="social-empty">Нет публичных файлов</div>'}</div>
+      </section>
+    </div>
+  `;
+}
+
+async function loadExploreOverview() {
+  const mount = document.getElementById('exploreOverview');
+  if (!mount) return;
+  try {
+    mount.innerHTML = exploreOverviewHtml(await api('/explore/overview'));
+  } catch {
+    mount.innerHTML = '';
+  }
 }
 
 // ── HEIC CONVERTER ──
@@ -2384,7 +2615,7 @@ async function renderBookmarks(app) {
 
 async function delPost(id) {
   if (!confirm('Удалить пост?')) return;
-  try { await api(`/posts/${id}`, { method: 'DELETE' }); $(`.post[data-id="${id}"]`)?.remove(); } catch {}
+  try { await api(`/posts/${id}`, { method: 'DELETE' }); $(`.post[data-id="${id}"]`)?.remove(); } catch (e) { console.debug('delPost failed:', e.message); }
 }
 
 function showRepostMenu(id, btn, alreadyReposted) {
@@ -2452,7 +2683,7 @@ async function repostDirect(id) {
   _repostMenuEl?.remove(); _repostMenuEl = null;
   const fd = new FormData();
   fd.append('content', ''); fd.append('repost_of', id);
-  try { await api('/posts', { method: 'POST', body: fd }); go(page); } catch {}
+  try { await api('/posts', { method: 'POST', body: fd }); go(page); } catch (e) { console.debug('doRepost failed:', e.message); }
 }
 
 function showQuoteCompose(postId) {
@@ -2484,7 +2715,7 @@ async function submitQuote(postId) {
     await api('/posts', { method: 'POST', body: fd });
     document.getElementById(`qc-${postId}`)?.remove();
     go(page);
-  } catch {}
+  } catch (e) { console.debug('submitQuote failed:', e.message); }
 }
 
 async function togCmts(id) {
@@ -2495,50 +2726,82 @@ async function togCmts(id) {
   sec.innerHTML = '<div class="empty" style="padding:0.5rem 0">· · ·</div>';
   try {
     const cmts = await api(`/posts/${id}/comments`);
-    let h = cmts.map(c => `
-      <div class="cmt">
-        <span class="cmt-name" data-post-action="go-profile" data-username="${esc(c.username)}">${esc(c.display_name)}</span>${esc(c.content)}
-        <span class="cmt-time">${timeAgo(c.created_at)}</span>
+    sec.innerHTML = commentsHtml(id, cmts);
+  } catch (e) { console.debug('togCmts failed:', e.message); }
+}
+
+function commentsHtml(postId, cmts) {
+  const rows = Array.isArray(cmts) ? cmts : [];
+  const roots = rows.filter(c => !c.parent_id);
+  const replies = rows.filter(c => c.parent_id).reduce((acc, c) => {
+    (acc[c.parent_id] ||= []).push(c);
+    return acc;
+  }, {});
+  const rowHtml = (c, isReply = false) => `
+    <div class="cmt ${isReply ? 'cmt-reply' : ''}" data-comment-id="${esc(c.id)}">
+      ${avatarEl(c.avatar, 'avatar-xs', initial(c.display_name))}
+      <div class="cmt-main">
+        <div class="cmt-line">
+          <span class="cmt-name" data-post-action="go-profile" data-username="${esc(c.username)}">${esc(c.display_name)}${verifiedBadge(c.is_verified, c.badge_type)}</span>
+          <span class="cmt-text">${linkifyContent(c.content || '')}</span>
+        </div>
+        <div class="cmt-tools">
+          <span class="cmt-time">${timeAgo(c.created_at)}</span>
+          <button class="cmt-tool ${c.liked ? 'active' : ''}" data-post-action="comment-like" data-comment-id="${esc(c.id)}" data-liked="${c.liked ? '1' : '0'}">${iconCut(c.liked ? 'like-filled' : 'like', 'ui-icon', 12, 12)}<span>${c.likes || ''}</span></button>
+          ${me ? `<button class="cmt-tool" data-post-action="reply-comment" data-post-id="${esc(postId)}" data-comment-id="${esc(c.id)}" data-username="${esc(c.username)}">reply</button>` : ''}
+        </div>
       </div>
-    `).join('');
-    if (me) h += `
-      <div class="cmt-form">
-        <input type="text" placeholder="Комментарий..." id="ci-${id}" data-post-action="comment-input" data-post-id="${id}">
-        <button class="cmt-send" data-post-action="send-comment" data-post-id="${id}" aria-label="Отправить">${iconCut('send', 'ui-icon', 18, 18)}</button>
-      </div>
-    `;
-    sec.innerHTML = h || '<div class="empty" style="padding:0.5rem 0;font-size:0.7rem">Нет комментариев</div>' + (me ? h : '');
-  } catch {}
+    </div>`;
+  const body = roots.map(c => rowHtml(c) + (replies[c.id] || []).map(r => rowHtml(r, true)).join('')).join('');
+  const form = me ? `
+    <div class="cmt-form">
+      <input type="text" placeholder="Комментарий..." id="ci-${postId}" data-post-action="comment-input" data-post-id="${postId}">
+      <input type="hidden" id="cr-${postId}" value="">
+      <button class="cmt-send" data-post-action="send-comment" data-post-id="${postId}" aria-label="Отправить">${iconCut('send', 'ui-icon', 18, 18)}</button>
+    </div>
+  ` : '';
+  return (body || '<div class="empty" style="padding:0.5rem 0;font-size:0.7rem">Нет комментариев</div>') + form;
+}
+
+function startCommentReply(postId, commentId, username) {
+  const input = document.getElementById(`ci-${postId}`);
+  const parent = document.getElementById(`cr-${postId}`);
+  if (parent) parent.value = commentId;
+  if (input) {
+    input.placeholder = `Reply to @${username}`;
+    input.value = `@${username} `;
+    input.focus();
+  }
+}
+
+async function toggleCommentLike(commentId, liked, btn) {
+  if (!commentId) return;
+  try {
+    const d = await api(`/comments/${commentId}/like`, { method: liked ? 'DELETE' : 'POST' });
+    btn.dataset.liked = liked ? '0' : '1';
+    btn.classList.toggle('active', !liked);
+    btn.innerHTML = `${iconCut(!liked ? 'like-filled' : 'like', 'ui-icon', 12, 12)}<span>${d.likes || ''}</span>`;
+  } catch (e) { toast.error(e.message); }
 }
 
 async function sendCmt(id) {
   const inp = $(`#ci-${id}`);
+  const parent = $(`#cr-${id}`);
   const content = inp?.value?.trim();
   if (!content) return;
   try {
-    await api(`/posts/${id}/comments`, { method:'POST', body: { content } });
+    await api(`/posts/${id}/comments`, { method:'POST', body: { content, parent_id: parent?.value || '' } });
     if (inp) inp.value = '';
+    if (parent) parent.value = '';
     // refresh comments if section is visible
     const sec = $(`#cmts-${id}`);
     if (sec) {
       // fetch updated comments list
       const cmts = await api(`/posts/${id}/comments`);
-      let h = cmts.map(c => `
-        <div class="cmt">
-          <span class="cmt-name" data-post-action="go-profile" data-username="${esc(c.username)}">${esc(c.display_name)}</span>${esc(c.content)}
-          <span class="cmt-time">${timeAgo(c.created_at)}</span>
-        </div>
-      `).join('');
-      if (me) h += `
-        <div class="cmt-form">
-          <input type="text" placeholder="Комментарий..." id="ci-${id}" data-post-action="comment-input" data-post-id="${id}">
-          <button class="cmt-send" data-post-action="send-comment" data-post-id="${id}" aria-label="Отправить">${iconCut('send', 'ui-icon', 18, 18)}</button>
-        </div>
-      `;
-      sec.innerHTML = h || '<div class="empty" style="padding:0.5rem 0;font-size:0.7rem">Нет комментариев</div>' + (me ? h : '');
+      sec.innerHTML = commentsHtml(id, cmts);
       sec.classList.remove('hidden');
     }
-  } catch {}
+  } catch (e) { console.debug('sendCmt failed:', e.message); }
 }
 
 // ── HASHTAG ──
@@ -2557,7 +2820,7 @@ async function renderHashtag(app, tag) {
 async function renderArtists(app) {
   const artists = await api('/artists');
   app.innerHTML = `
-    ${opiumCommandStrip('search')}
+    ${opiumCommandStrip('')}
     ${pageTitleIc('profile', 'ARTISTS')}
     ${opiumMetricCards([
       { label: 'network', value: artists.length, note: 'artists inside' },
@@ -2773,8 +3036,13 @@ async function renderProfile(app, username) {
   if (!username && me) username = me.username;
   if (!username) return go('login');
   try {
-    const u = await api(`/user/${username}`);
-    const posts = await api(`/user/${username}/posts`);
+    const [u, posts, profileDrops, publicFiles, showcase] = await Promise.all([
+      api(`/user/${username}`),
+      api(`/user/${username}/posts`),
+      api(`/user/${username}/drops`).catch(()=>[]),
+      api(`/user/${username}/public-files`).catch(()=>[]),
+      api(`/user/${username}/showcase`).catch(()=>null),
+    ]);
     const isMe = me && me.id === u.id;
 
     const links = [];
@@ -2807,6 +3075,17 @@ async function renderProfile(app, username) {
     const allPosts = Array.isArray(posts) ? posts : (posts.posts || []);
     const trackPosts = allPosts.filter(p => p.track_url);
     const archivedPosts = isMe ? allPosts.filter(p => p.archived && !p.repost_of) : [];
+    const activeDrops = Array.isArray(profileDrops) ? profileDrops : [];
+    const sharedFiles = Array.isArray(publicFiles) ? publicFiles : [];
+    const publicFileRows = sharedFiles.map(f => `
+      <a class="profile-file-row" href="/pub/${esc(f.public_token)}" target="_blank" rel="noopener">
+        <span class="profile-file-ic">${iconCut((f.mime || '').startsWith('image/') ? 'media' : 'download', 'ui-icon', 14, 14)}</span>
+        <span class="profile-file-main">
+          <strong>${esc(f.name)}</strong>
+          <small>${fmtBytes(f.size || 0)}${f.description ? ` &middot; ${esc(f.description)}` : ''}</small>
+        </span>
+      </a>
+    `).join('');
 
     app.innerHTML = `
       ${opiumCommandStrip('')}
@@ -2829,19 +3108,25 @@ async function renderProfile(app, username) {
         ${links.length ? `<div class="profile-socials">${links.join('')}</div>` : ''}
         <div class="profile-btns">${btns}</div>
       </div>
+      ${profileShowcaseHtml(showcase)}
       ${opiumMetricCards([
         { label: 'posts', value: u.posts || 0, note: 'public output' },
         { label: 'tracks', value: trackPosts.length, note: 'audio signal' },
-        { label: 'links', value: links.length, note: 'outside presence' },
+        { label: 'drops', value: activeDrops.length, note: 'live for 24h' },
+        { label: 'files', value: sharedFiles.length, note: 'public disk' },
       ])}
       <div class="profile-tabs">
         <button class="profile-tab active" data-post-action="profile-tab" data-tab-id="postsTab">${iconCut('home', 'ui-icon', 12, 12)}ПОСТЫ</button>
         <button class="profile-tab" data-post-action="profile-tab" data-tab-id="tracksTab">${iconCut('mic', 'ui-icon', 12, 12)}ТРЕКИ${trackPosts.length ? ` <span class="tab-count">${trackPosts.length}</span>` : ''}</button>
+        <button class="profile-tab" data-post-action="profile-tab" data-tab-id="dropsTab">${iconCut('notifications', 'ui-icon', 12, 12)}DROPS${activeDrops.length ? ` <span class="tab-count">${activeDrops.length}</span>` : ''}</button>
+        <button class="profile-tab" data-post-action="profile-tab" data-tab-id="filesTab">${iconCut('download', 'ui-icon', 12, 12)}DISK${sharedFiles.length ? ` <span class="tab-count">${sharedFiles.length}</span>` : ''}</button>
         ${isMe ? `<button class="profile-tab" data-post-action="profile-tab" data-tab-id="bmTab">${iconCut('bookmark', 'ui-icon', 12, 12)}СОХРАНЁННЫЕ</button>` : ''}
         ${isMe && archivedPosts.length ? `<button class="profile-tab" data-post-action="profile-tab" data-tab-id="archTab">${iconCut('lock', 'ui-icon', 12, 12)}АРХИВ <span class="tab-count">${archivedPosts.length}</span></button>` : ''}
       </div>
       <div id="postsTab">${allPosts.filter(p=>!p.archived).length ? allPosts.filter(p=>!p.archived).map(postHtml).join('') : '<div class="empty">Нет постов</div>'}</div>
       <div id="tracksTab" class="hidden">${trackPosts.length ? trackPosts.map(postHtml).join('') : '<div class="empty">Нет треков</div>'}</div>
+      <div id="dropsTab" class="hidden">${activeDrops.length ? activeDrops.map(dropHtml).join('') : '<div class="empty">Нет активных дропов</div>'}</div>
+      <div id="filesTab" class="hidden">${publicFileRows || '<div class="empty">Нет публичных файлов</div>'}</div>
       ${isMe ? `<div id="bmTab" class="hidden"><div class="empty empty-big">· · ·</div></div>` : ''}
       ${isMe && archivedPosts.length ? `<div id="archTab" class="hidden">${archivedPosts.map(postHtml).join('')}</div>` : ''}
     `;
@@ -2868,6 +3153,28 @@ async function upAvaProfile() {
 }
 
 function showPostsCount() { /* posts tab is already visible */ }
+
+function profileShowcaseHtml(showcase) {
+  if (!showcase || showcase.private) return '';
+  const post = showcase.pinned_post || showcase.top_post;
+  const file = showcase.featured_file;
+  const drop = showcase.latest_drop;
+  const mutuals = (showcase.mutuals || []).map(u =>
+    `<span class="mutual-pill" data-post-action="go-profile" data-username="${esc(u.username)}">${avatarEl(u.avatar, 'avatar-xs', initial(u.display_name))}@${esc(u.username)}</span>`
+  ).join('');
+  if (!post && !file && !drop && !mutuals) return '';
+  return `
+    <section class="profile-showcase">
+      <div class="social-card-head"><div><span>SHOWCASE</span><strong>${post ? 'featured post' : file ? 'public disk' : 'network'}</strong></div></div>
+      <div class="profile-showcase-grid">
+        ${post ? `<div class="showcase-tile" data-post-action="expand-post" data-post-id="${esc(post.id)}"><span>POST</span><strong>${esc((post.content || 'media post').slice(0, 110))}</strong><small>${post.likes || 0} likes &middot; ${post.comments || 0} comments</small></div>` : ''}
+        ${drop ? `<div class="showcase-tile" data-post-action="go" data-nav-target="drops"><span>DROP</span><strong>${esc((drop.content || 'active drop').slice(0, 90))}</strong><small>${drop.view_count || 0} views</small></div>` : ''}
+        ${file ? `<a class="showcase-tile" href="/pub/${esc(file.public_token)}" target="_blank" rel="noopener"><span>DISK</span><strong>${esc(file.name)}</strong><small>${fmtBytes(file.size || 0)}${file.description ? ` &middot; ${esc(file.description)}` : ''}</small></a>` : ''}
+      </div>
+      ${mutuals ? `<div class="profile-mutuals"><span>Mutuals</span>${mutuals}</div>` : ''}
+    </section>
+  `;
+}
 
 async function doFollow(id, u) { try { await api(`/follow/${id}`, { method:'POST' }); go('profile',u); } catch(e) { toast.error(e.message); } }
 async function unfollow(id, u) { try { await api(`/follow/${id}`, { method:'DELETE' }); go('profile',u); } catch(e) { toast.error(e.message); } }
@@ -2904,7 +3211,7 @@ async function unmuteUser(username) {
 function switchProfileTab(btn, tabId) {
   document.querySelectorAll('.profile-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  ['postsTab','tracksTab','archTab','bmTab'].forEach(id => {
+  ['postsTab','tracksTab','dropsTab','filesTab','archTab','bmTab'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.toggle('hidden', id !== tabId);
   });
@@ -2924,13 +3231,22 @@ async function renderSettings(app) {
   if (!me) return go('login');
   let u;
   try { u = await api('/me'); } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const settingsTabs = [
+    ['profile', 'ПРОФИЛЬ'],
+    ['privacy', 'ПРИВАТНОСТЬ'],
+    ['access', 'ДОСТУП'],
+    ['security', 'БЕЗОПАСНОСТЬ'],
+  ];
   app.innerHTML = `
     ${opiumCommandStrip('')}
     ${pageTitleIc('settings', 'НАСТРОЙКИ')}
     <div class="settings">
+      <div class="settings-tabs">
+        ${settingsTabs.map(([id, label]) => `<button type="button" class="settings-tab${settingsTab === id ? ' active' : ''}" data-post-action="settings-tab" data-settings-tab="${id}">${label}</button>`).join('')}
+      </div>
 
       <!-- ── ПРОФИЛЬ ── -->
-      <div class="settings-section">
+      <div class="settings-section" data-settings-panel="profile">
         <div class="settings-section-title">ПРОФИЛЬ</div>
         <div class="settings-avatar-row">
           ${avatarEl(u.avatar, 'avatar avatar-lg', initial(u.display_name))}
@@ -2951,7 +3267,7 @@ async function renderSettings(app) {
       </div>
 
       <!-- ── ССЫЛКИ ── -->
-      <div class="settings-section">
+      <div class="settings-section" data-settings-panel="profile">
         <div class="settings-section-title">ССЫЛКИ <span class="field-hint-inline">· только https://, показываются в профиле</span></div>
         <div class="field"><label>SOUNDCLOUD</label><input class="input" id="sSc" value="${esc(u.link_sc)}" placeholder="https://soundcloud.com/..." autocomplete="off"></div>
         <div class="field"><label>INSTAGRAM</label><input class="input" id="sIg" value="${esc(u.link_ig)}" placeholder="https://instagram.com/..." autocomplete="off"></div>
@@ -2961,7 +3277,7 @@ async function renderSettings(app) {
       </div>
 
       <!-- ── ПРИВАТНОСТЬ ── -->
-      <div class="settings-section">
+      <div class="settings-section" data-settings-panel="privacy">
         <div class="settings-section-title">ПРИВАТНОСТЬ</div>
         <div class="stg-toggle-row">
           <div class="stg-toggle-info">
@@ -3015,13 +3331,8 @@ async function renderSettings(app) {
         </div>
       </div>
 
-      <div class="gap-row">
-        <button class="btn btn-ic-row" data-post-action="save-profile">${iconCut('check', 'ui-icon', 15, 15)}СОХРАНИТЬ</button>
-        <button class="btn btn-ghost btn-ic-row" data-post-action="do-logout">${iconCut('lock', 'ui-icon', 15, 15)}ВЫЙТИ</button>
-      </div>
-
       <!-- ── ИНВАЙТ-КОД ── -->
-      <div class="settings-section">
+      <div class="settings-section" data-settings-panel="access">
         <div class="settings-section-title">ИНВАЙТ-КОД</div>
         <div class="stg-toggle-desc" style="margin-bottom:0.5rem">Поделись с другом — он укажет при регистрации</div>
         <div class="invite-row">
@@ -3031,7 +3342,7 @@ async function renderSettings(app) {
       </div>
 
       <!-- ── УСТРОЙСТВА ── -->
-      <div class="settings-section">
+      <div class="settings-section" data-settings-panel="security">
         <div class="settings-section-title">УСТРОЙСТВА</div>
         <div class="stg-toggle-desc" style="margin-bottom:0.75rem">Активные сессии (все устройства где ты залогинен)</div>
         <div id="sessionsList"><div class="empty" style="font-size:0.7rem">· · ·</div></div>
@@ -3042,7 +3353,7 @@ async function renderSettings(app) {
       </div>
 
       <!-- ── ВЕРИФИКАЦИЯ ── -->
-      <div class="settings-section">
+      <div class="settings-section" data-settings-panel="access">
         <div class="settings-section-title">ВЕРИФИКАЦИЯ</div>
         ${u.is_verified ? `
           <div class="verify-status verified">
@@ -3065,7 +3376,7 @@ async function renderSettings(app) {
       </div>
 
       <!-- ── БЕЗОПАСНОСТЬ ── -->
-      <div class="settings-section">
+      <div class="settings-section" data-settings-panel="security">
         <div class="settings-section-title">БЕЗОПАСНОСТЬ</div>
         <div class="field"><label>ТЕКУЩИЙ ПАРОЛЬ</label><input class="input" id="sOld" type="password" placeholder="Введи текущий пароль" autocomplete="current-password"></div>
         <div class="field"><label>НОВЫЙ ПАРОЛЬ</label><input class="input" id="sNew" type="password" placeholder="Мин. 8 символов" autocomplete="new-password"><div id="pwStrength" class="pw-strength"></div></div>
@@ -3083,6 +3394,11 @@ async function renderSettings(app) {
         </div>
       </div>
 
+      <div class="gap-row settings-actions">
+        <button class="btn btn-ic-row" data-post-action="save-profile">${iconCut('check', 'ui-icon', 15, 15)}СОХРАНИТЬ</button>
+        <button class="btn btn-ghost btn-ic-row" data-post-action="do-logout">${iconCut('lock', 'ui-icon', 15, 15)}ВЫЙТИ</button>
+      </div>
+
     </div>
   `;
   dirtySettings = false;
@@ -3096,9 +3412,22 @@ async function renderSettings(app) {
     if (avaFileInput) avaFileInput.addEventListener('change', upAva);
     const pushToggle = document.getElementById('sPush');
     if (pushToggle) pushToggle.addEventListener('change', e => togglePushNotifications(e.target.checked));
+    switchSettingsTab(settingsTab, false);
     initPushState();
     loadSessions();
   }, 50);
+}
+
+function switchSettingsTab(tab, persist = true) {
+  const valid = new Set(['profile', 'privacy', 'access', 'security']);
+  settingsTab = valid.has(tab) ? tab : 'profile';
+  if (persist) localStorage.setItem('settingsTab', settingsTab);
+  document.querySelectorAll('.settings-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.settingsTab === settingsTab);
+  });
+  document.querySelectorAll('[data-settings-panel]').forEach(panel => {
+    panel.classList.toggle('hidden', panel.dataset.settingsPanel !== settingsTab);
+  });
 }
 
 function _beforeUnloadHandler(e) {
@@ -3184,6 +3513,24 @@ async function changePassword() {
 }
 
 // ── SESSION MANAGEMENT ──
+function parseUA(ua) {
+  if (!ua) return 'Неизвестное устройство';
+  const browser =
+    ua.includes('Edg/')     ? 'Edge' :
+    ua.includes('OPR/')     ? 'Opera' :
+    ua.includes('Chrome/')  ? 'Chrome' :
+    ua.includes('Firefox/') ? 'Firefox' :
+    ua.includes('Safari/')  ? 'Safari' : 'Browser';
+  const os =
+    ua.includes('Windows')  ? 'Windows' :
+    ua.includes('Macintosh')? 'Mac' :
+    ua.includes('iPhone')   ? 'iPhone' :
+    ua.includes('iPad')     ? 'iPad' :
+    ua.includes('Android')  ? 'Android' :
+    ua.includes('Linux')    ? 'Linux' : 'Unknown OS';
+  return `${browser} · ${os}`;
+}
+
 async function loadSessions() {
   const list = document.getElementById('sessionsList');
   if (!list) return;
@@ -3192,7 +3539,7 @@ async function loadSessions() {
     list.innerHTML = sessions.map(s => `
       <div class="session-row">
         <div class="session-info">
-          <div class="session-ua">${esc(s.user_agent.slice(0,60) || 'Неизвестное устройство')}</div>
+          <div class="session-ua">${esc(parseUA(s.user_agent))}</div>
           <div class="session-meta">${esc(s.ip || '—')} · ${timeAgo(s.created_at)}${s.is_current ? ' · <span style="color:var(--green)">текущая</span>' : ''}</div>
         </div>
       </div>
@@ -3244,7 +3591,17 @@ async function renderNotifs(app) {
   me.notif_count = 0; renderNav();
   if (!notifs.length) { app.innerHTML = `${opiumCommandStrip('')}${pageTitleIc('notifications', 'УВЕДОМЛЕНИЯ', 16, 16)}<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('notifications', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Всё тихо</div><div class="onboarding-text">Здесь будут лайки, комментарии и новые подписчики</div></div>`; return; }
 
-  const typeMap = { like: '♥ лайкнул пост', comment: '◈ прокомментировал', follow: '→ подписался', repost: '↻ репостнул', dm: '✦ прислал сообщение', follow_request: 'хочет подписаться на тебя' };
+  const typeMap = {
+    like: 'liked your post',
+    comment: 'commented on your post',
+    comment_reply: 'replied to your comment',
+    comment_like: 'liked your comment',
+    mention: 'mentioned you',
+    follow: 'followed you',
+    repost: 'reposted your post',
+    dm: 'sent a message',
+    follow_request: 'wants to follow you',
+  };
   // Aggregate DM notifications: one entry per conversation
   const seen = new Set();
   const dedupedNotifs = notifs.filter(n => {
@@ -3254,15 +3611,30 @@ async function renderNotifs(app) {
     }
     return true;
   });
+  const counts = dedupedNotifs.reduce((acc, n) => {
+    acc[n.type] = (acc[n.type] || 0) + 1;
+    return acc;
+  }, {});
+  const cards = [
+    { label:'social', value:(counts.like||0)+(counts.comment||0)+(counts.comment_reply||0)+(counts.comment_like||0)+(counts.mention||0), note:'posts and comments' },
+    { label:'people', value:(counts.follow||0)+(counts.follow_request||0), note:'followers' },
+    { label:'dm', value:counts.dm||0, note:'messages' },
+  ];
   app.innerHTML = `
     ${opiumCommandStrip('')}
     ${pageTitleIc('notifications', 'УВЕДОМЛЕНИЯ', 16, 16)}
+    ${opiumMetricCards(cards)}
+    <div class="notif-action-row">
+      <button class="seg-btn active">${iconCut('notifications', 'ui-icon', 12, 12)}ALL</button>
+      <button class="seg-btn" data-post-action="go-discover">${iconCut('search', 'ui-icon', 12, 12)}DISCOVER</button>
+    </div>
     ${dedupedNotifs.map(n => `
-      <div class="artist-row" data-post-action="${n.type==='dm' && n.ref_id ? 'go-chat' : 'go-profile'}" data-conv-id="${esc(n.ref_id || '')}" data-username="${esc(n.username || '')}" style="cursor:pointer">
+      <div class="notif-card" data-post-action="${n.type==='dm' && n.ref_id ? 'go-chat' : (n.ref_id && n.type !== 'follow' && n.type !== 'follow_request') ? 'expand-post' : 'go-profile'}" data-post-id="${esc(n.ref_id || '')}" data-conv-id="${esc(n.ref_id || '')}" data-username="${esc(n.username || '')}">
         ${avatarEl(n.avatar, 'avatar', initial(n.display_name))}
-        <div class="artist-info">
-          <div class="artist-name">${esc(n.display_name)}</div>
-          <div class="artist-bio">${typeMap[n.type] || n.type}</div>
+        <div class="notif-card-main">
+          <div class="notif-card-title"><strong>${esc(n.display_name)}</strong> ${esc(typeMap[n.type] || n.type)}</div>
+          ${n.post_content ? `<div class="notif-card-preview">${esc(n.post_content.slice(0, 120))}</div>` : ''}
+          ${n.conv_title ? `<div class="notif-card-preview">${esc(n.conv_title)}</div>` : ''}
         </div>
         <div class="artist-count">${timeAgo(n.created_at)}</div>
       </div>
@@ -3499,7 +3871,7 @@ async function renderChat(app, cid) {
     });
     return `
       ${!chatSidebarFilters.archived && pendingChats.length ? `<div class="dm-section-title">ЗАПРОСЫ (${pendingChats.length})</div>${pendingChats.map(c => chatRow(c, cid)).join('')}` : ''}
-      ${filtered.length ? filtered.map(c => chatRow(c, cid)).join('') : '<div class="empty">Нет диалогов</div>'}
+      ${filtered.length ? filtered.map(c => chatRow(c, cid)).join('') : `<div class="chat-list-empty"><div>Нет диалогов</div><span>Сбрось фильтры или начни новый групповой чат.</span></div>`}
     `;
   };
 
@@ -4565,16 +4937,24 @@ function openVideo(src) {
   if (document.getElementById('lightbox')) return;
   const lb = document.createElement('div');
   lb.id = 'lightbox';
-  lb.innerHTML = `<div class="lb-backdrop"></div><video class="lb-video" src="${src}" controls autoplay playsinline></video>`;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'lb-backdrop';
+  const video = document.createElement('video');
+  video.className = 'lb-video';
+  video.controls = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.src = src;
+  lb.append(backdrop, video);
   document.body.appendChild(lb);
   requestAnimationFrame(() => lb.classList.add('lb-in'));
   const close = () => {
-    lb.querySelector('video')?.pause();
+    video.pause();
     lb.classList.remove('lb-in');
     lb.addEventListener('transitionend', () => lb.remove(), { once: true });
   };
-  lb.querySelector('.lb-backdrop').addEventListener('click', close);
-  lb.querySelector('.lb-video').addEventListener('click', e => e.stopPropagation());
+  backdrop.addEventListener('click', close);
+  video.addEventListener('click', e => e.stopPropagation());
   document.addEventListener('keydown', function esc(e) {
     if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
   });
@@ -5051,7 +5431,12 @@ async function loadAdminTab() {
           <div class="stat-card"><div class="stat-val">${s.today}</div><div class="stat-lbl">новых сегодня</div></div>
           <div class="stat-card"><div class="stat-val">${s.msgs}</div><div class="stat-lbl">сообщений</div></div>
           <div class="stat-card"><div class="stat-val">${s.msgToday}</div><div class="stat-lbl">сообщений сегодня</div></div>
-          <div class="stat-card"><div class="stat-val">${s.drops}</div><div class="stat-lbl">активных drops</div></div>
+          <div class="stat-card"><div class="stat-val">${s.posts||0}</div><div class="stat-lbl">постов</div></div>
+          <div class="stat-card"><div class="stat-val">${s.comments||0}</div><div class="stat-lbl">комментариев</div></div>
+          <div class="stat-card"><div class="stat-val">${s.drops}</div><div class="stat-lbl">активных дропов</div></div>
+          <div class="stat-card"><div class="stat-val">${s.files||0}</div><div class="stat-lbl">файлов на диске</div></div>
+          <div class="stat-card"><div class="stat-val">${s.publicFiles||0}</div><div class="stat-lbl">публичных файлов</div></div>
+          <div class="stat-card"><div class="stat-val">${s.sessions||0}</div><div class="stat-lbl">сессий</div></div>
           <div class="stat-card"><div class="stat-val">${s.banned}</div><div class="stat-lbl">забанено</div></div>
           <div class="stat-card"><div class="stat-val">${s.admins}</div><div class="stat-lbl">администраторов</div></div>
           <div class="stat-card"><div class="stat-val">${s.reports||0}</div><div class="stat-lbl">открытых жалоб</div></div>
@@ -5060,6 +5445,13 @@ async function loadAdminTab() {
     } else if (adminTab === 'users') {
       const users = await api('/admin/users');
       el.innerHTML = `
+        <div class="admin-user-create">
+          <input class="input" id="adminNewUsername" placeholder="username">
+          <input class="input" id="adminNewDisplay" placeholder="display name">
+          <input class="input" id="adminNewPass" placeholder="password">
+          <label class="admin-check"><input type="checkbox" id="adminNewIsAdmin"> admin</label>
+          <button class="btn btn-sm btn-ic-row" data-post-action="admin-create-user">${iconCut('add', 'ui-icon', 13, 13)}CREATE</button>
+        </div>
         <div class="admin-search-row">
           <input class="input" id="adminUserSearch" placeholder="Поиск по нику..." style="max-width:260px">
         </div>
@@ -5212,6 +5604,8 @@ function adminUserRow(u) {
       ${isMe ? '' : `
         <div class="admin-actions">
           <button class="btn btn-sm btn-ic-row ${isBanned?'':'btn-danger'}" data-post-action="admin-ban" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}" data-is-banned="${isBanned ? '1' : '0'}">${isBanned ? iconCut('unlock', 'ui-icon', 13, 13) + 'РАЗБАН' : iconCut('lock', 'ui-icon', 13, 13) + 'БАН'}</button>
+          <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="admin-reset-pass" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}">${iconCut('lock', 'ui-icon', 12, 12)}PASS</button>
+          <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="admin-revoke-sessions" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}">${iconCut('close', 'ui-icon', 12, 12)}SESS</button>
           ${!u.is_admin ? `<button class="btn btn-sm btn-ic-row" data-post-action="admin-promote" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}" data-is-admin="0">${iconCut('add', 'ui-icon', 12, 12)}ADMIN</button>` : ''}
           <button class="btn btn-sm btn-ic-row ${u.is_verified?'btn-ghost':''}" data-post-action="admin-verify" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}" data-is-verified="${u.is_verified ? '1' : '0'}" data-badge-type="${esc(u.badge_type||'')}">${u.is_verified?`${verifiedBadge(true,u.badge_type)} ВЕРИФИЦИРОВАН`:`${iconCut('check', 'ui-icon', 13, 13)}ВЕРИФИЦИРОВАТЬ`}</button>
           ${!u.is_admin ? `<button class="btn btn-sm btn-danger" data-post-action="admin-delete-user" data-user-id="${esc(u.id)}" data-username="${esc(u.username)}" aria-label="Удалить">${iconCut('trash', 'ui-icon', 15, 15)}</button>` : ''}
@@ -5241,6 +5635,37 @@ async function adminBan(uid, username, isBanned) {
     await api(`/admin/users/${uid}/ban`, { method:'POST', body:{} });
   }
   loadAdminTab();
+}
+
+async function adminCreateUser() {
+  const username = document.getElementById('adminNewUsername')?.value?.trim();
+  const display_name = document.getElementById('adminNewDisplay')?.value?.trim() || username;
+  const password = document.getElementById('adminNewPass')?.value?.trim();
+  const is_admin = !!document.getElementById('adminNewIsAdmin')?.checked;
+  if (!username || !password) { toast.error('Username and password required'); return; }
+  try {
+    const r = await api('/admin/users', { method:'POST', body:{ username, display_name, password, is_admin } });
+    toast.success(`Created @${r.username}`);
+    await loadAdminTab();
+  } catch (e) { toast.error(e.message); }
+}
+
+async function adminResetPass(uid, username) {
+  const password = prompt(`New password for @${username}:`, `${username}-W0PIUM-${new Date().getFullYear()}`);
+  if (!password) return;
+  try {
+    const r = await api(`/admin/users/${uid}/password`, { method:'POST', body:{ password } });
+    await navigator.clipboard?.writeText(`${r.username} / ${r.password}`).catch(()=>{});
+    toast.success(`Password reset for @${r.username}`);
+  } catch (e) { toast.error(e.message); }
+}
+
+async function adminRevokeSessions(uid, username) {
+  if (!confirm(`Revoke all sessions for @${username}?`)) return;
+  try {
+    const r = await api(`/admin/users/${uid}/sessions`, { method:'DELETE' });
+    toast.success(`Revoked ${r.revoked || 0} sessions`);
+  } catch (e) { toast.error(e.message); }
 }
 
 async function adminPromote(uid, username, isAdmin) {
@@ -6111,10 +6536,20 @@ async function renderDrops(app) {
     );
     app.innerHTML = `
       ${opiumCommandStrip('drops')}
-      ${pageTitleIc('media', 'DROPS')}
+      <div class="page-title-row">
+        <span class="page-title page-title--ic">${iconCut('media', 'ui-icon page-title-ic', 15, 15)}DROPS</span>
+        <div class="page-title-actions">
+          <button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="refresh-drops">${iconCut('download', 'ui-icon', 13, 13)}SYNC</button>
+        </div>
+      </div>
+      ${opiumMetricCards([
+        { label: 'active', value: drops.length, note: '24h posts' },
+        { label: 'new', value: drops.filter(d => !d.viewed).length, note: 'unseen' },
+        { label: 'views', value: drops.reduce((sum, d) => sum + (Number(d.view_count) || 0), 0), note: 'total' },
+      ])}
       ${dropComposerHtml()}
-      <div id="dropList">${drops.length ? drops.map(dropHtml).join('') :
-        '<div class="empty">Нет дропов. Брось что-нибудь.</div>'}</div>
+      <div id="dropList" class="drop-list">${drops.length ? drops.map(dropHtml).join('') :
+        `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('media', 'ui-icon', 28, 28)}</div><div class="onboarding-title">DROPS EMPTY</div><div class="onboarding-text">Drop a moment, track views, and let it disappear on schedule.</div></div>`}</div>
     `;
     bindDropImg();
     bindMentionAutocomplete('dText', 'dMentionDrop');
@@ -6216,7 +6651,7 @@ function diskCardHtml(f) {
     <div class="disk-card-thumb">${diskThumbHtml(f)}</div>
     <div class="disk-card-info">
       <div class="disk-card-name" title="${esc(f.name)}">${esc(f.name)}</div>
-      <div class="disk-card-size">${fmtBytes(f.size)}</div>
+      <div class="disk-card-size">${fmtBytes(f.size)} · ${type.toUpperCase()} · ${timeAgo(f.created_at)}</div>
     </div>
   </div>`;
 }
@@ -6262,6 +6697,13 @@ function diskGetFiltered() {
   return files;
 }
 
+function diskGetVisibleFolders() {
+  if (diskActiveFilter !== 'all') return [];
+  const q = diskSearch.trim().toLowerCase();
+  if (!q) return diskFolders;
+  return diskFolders.filter(folder => (folder.name || '').toLowerCase().includes(q));
+}
+
 function renderDiskBreadcrumb() {
   const el = document.getElementById('diskBreadcrumb');
   if (!el) return;
@@ -6277,7 +6719,9 @@ function renderDiskFiles() {
   const wrap = document.getElementById('diskGrid');
   if (!wrap) return;
   _diskFiltered = diskGetFiltered();
-  const total = diskFolders.length + _diskFiltered.length;
+  const visibleFolders = diskGetVisibleFolders();
+  const total = visibleFolders.length + _diskFiltered.length;
+  renderDiskInspector(visibleFolders, _diskFiltered);
   if (!total) {
     wrap.className = '';
     const msg = diskSearch
@@ -6288,10 +6732,33 @@ function renderDiskFiles() {
     return;
   }
   wrap.className = diskView === 'grid' ? 'disk-cards' : 'disk-rows';
-  const folderHtml = diskFolders.map(diskView === 'grid' ? diskFolderCardHtml : diskFolderRowHtml).join('');
+  const folderHtml = visibleFolders.map(diskView === 'grid' ? diskFolderCardHtml : diskFolderRowHtml).join('');
   const fileHtml = _diskFiltered.map(diskView === 'grid' ? diskCardHtml : diskRowHtml).join('');
   wrap.innerHTML = folderHtml + fileHtml;
   updateDiskBulkBar();
+}
+
+function renderDiskInspector(folders = diskGetVisibleFolders(), files = _diskFiltered) {
+  const el = document.getElementById('diskInspector');
+  if (!el) return;
+  const size = files.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+  const counts = files.reduce((acc, f) => {
+    const type = diskFileType(f.mime, f.name);
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {});
+  const topTypes = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, count]) => `<span>${esc(type)} ${count}</span>`)
+    .join('');
+  el.innerHTML = `
+    <div class="disk-inspector-main">
+      <strong>${files.length}</strong><span>files</span>
+      <strong>${folders.length}</strong><span>folders</span>
+      <strong>${fmtBytes(size)}</strong><span>shown</span>
+    </div>
+    <div class="disk-inspector-types">${topTypes || '<span>empty</span>'}</div>
+  `;
 }
 
 function setDiskView(v) {
@@ -6536,11 +7003,13 @@ function diskNavPreview(dir) {
 function openDiskPreview(id) {
   const idx = _diskFiltered.findIndex(f => f.id === id);
   diskPreviewIdx = idx >= 0 ? idx : 0;
+  if (!_diskFiltered[diskPreviewIdx]) return;
   const overlay = document.getElementById('diskOverlay');
   if (!overlay) return;
   overlay.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   _renderDiskPreview(_diskFiltered[diskPreviewIdx]);
+  document.removeEventListener('keydown', _diskKeyHandler);
   document.addEventListener('keydown', _diskKeyHandler);
   // Mobile swipe
   let _sx = 0, _sy = 0;
@@ -7027,6 +7496,7 @@ async function renderDisk(app) {
       <span class="disk-filter-tab${diskActiveFilter==='video'?' active':''}" data-filter="video" data-post-action="disk-set-filter" data-filter-key="video">Видео</span>
       <span class="disk-filter-tab${diskActiveFilter==='other'?' active':''}" data-filter="other" data-post-action="disk-set-filter" data-filter-key="other">Файлы</span>
     </div>
+    <div id="diskInspector" class="disk-inspector"></div>
     <div id="diskBulkBar" class="disk-bulk-bar hidden">
       <span class="bulk-count"></span>
       <button class="btn btn-sm disk-bulk-zip" data-post-action="disk-download-zip">${iconCut('download', 'ui-icon', 15, 15)} ZIP</button>
