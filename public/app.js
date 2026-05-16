@@ -2098,16 +2098,16 @@ function socialOverviewHtml(data) {
         </section>
       ` : ''}
       <section class="social-card">
-        <div class="social-card-head"><div><span>DISCOVERY GRAPH</span><strong>${stats.following || 0} подписок</strong></div></div>
+        <div class="social-card-head"><div><span>DISCOVERY GRAPH</span><strong>${stats.following || 0} ${pluralRu(stats.following||0,'подписка','подписки','подписок')}</strong></div></div>
         <div class="suggestion-list">${suggestions || '<div class="social-empty">Нет предложений</div>'}</div>
       </section>
       <section class="social-card">
-        <div class="social-card-head"><div><span>NETWORK SIGNAL</span><strong>${stats.notifications || 0} сигналов</strong></div></div>
+        <div class="social-card-head"><div><span>NETWORK SIGNAL</span><strong>${stats.notifications || 0} ${pluralRu(stats.notifications||0,'сигнал','сигнала','сигналов')}</strong></div></div>
         <div class="trend-chips">${tags || '<div class="social-empty">Нет трендов</div>'}</div>
         <div class="mini-post-list">${hot || ''}</div>
       </section>
       <section class="social-card">
-        <div class="social-card-head"><div><span>LIVE DROPS</span><strong>${(data?.active_drops || []).length} активных</strong></div></div>
+        <div class="social-card-head"><div><span>LIVE DROPS</span><strong>${(data?.active_drops || []).length} ${pluralRu((data?.active_drops||[]).length,'активный','активных','активных')}</strong></div></div>
         <div class="drop-mini-list">${drops || '<div class="social-empty">Подпишись на артистов или опубликуй дроп</div>'}</div>
       </section>
     </div>

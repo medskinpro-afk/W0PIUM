@@ -3147,8 +3147,8 @@ function main() {
     res.json({
       ok: true,
       uptime: process.uptime(),
-      build: 'ui-polish-2.6',
-      app_version: '0.9.23',
+      build: 'ui-polish-2.7',
+      app_version: '0.9.24',
       db,
       social_schema,
     });
