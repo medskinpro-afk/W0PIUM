@@ -3125,8 +3125,8 @@ async function renderProfile(app, username) {
       <div class="profile-tabs">
         <button class="profile-tab active" data-post-action="profile-tab" data-tab-id="postsTab">${iconCut('home', 'ui-icon', 12, 12)}ПОСТЫ</button>
         <button class="profile-tab" data-post-action="profile-tab" data-tab-id="tracksTab">${iconCut('mic', 'ui-icon', 12, 12)}ТРЕКИ${trackPosts.length ? ` <span class="tab-count">${trackPosts.length}</span>` : ''}</button>
-        <button class="profile-tab" data-post-action="profile-tab" data-tab-id="dropsTab">${iconCut('notifications', 'ui-icon', 12, 12)}DROPS${activeDrops.length ? ` <span class="tab-count">${activeDrops.length}</span>` : ''}</button>
-        <button class="profile-tab" data-post-action="profile-tab" data-tab-id="filesTab">${iconCut('download', 'ui-icon', 12, 12)}DISK${sharedFiles.length ? ` <span class="tab-count">${sharedFiles.length}</span>` : ''}</button>
+        <button class="profile-tab" data-post-action="profile-tab" data-tab-id="dropsTab">${iconCut('notifications', 'ui-icon', 12, 12)}ДРОПЫ${activeDrops.length ? ` <span class="tab-count">${activeDrops.length}</span>` : ''}</button>
+        <button class="profile-tab" data-post-action="profile-tab" data-tab-id="filesTab">${iconCut('download', 'ui-icon', 12, 12)}ДИСК${sharedFiles.length ? ` <span class="tab-count">${sharedFiles.length}</span>` : ''}</button>
         ${isMe ? `<button class="profile-tab" data-post-action="profile-tab" data-tab-id="bmTab">${iconCut('bookmark', 'ui-icon', 12, 12)}СОХРАНЁННЫЕ</button>` : ''}
         ${isMe && archivedPosts.length ? `<button class="profile-tab" data-post-action="profile-tab" data-tab-id="archTab">${iconCut('lock', 'ui-icon', 12, 12)}АРХИВ <span class="tab-count">${archivedPosts.length}</span></button>` : ''}
       </div>
@@ -5328,10 +5328,11 @@ async function renderHub(app) {
     </div>
 
     ${groups.map(grp => {
+      const grpLabel = { SOCIALS: 'СОЦСЕТИ', MUSIC: 'МУЗЫКА', STREAMS: 'СТРИМЫ', CHATS: 'ЧАТЫ' }[grp] || grp;
       const items = HUB_PLATFORMS.filter(p => p.group === grp);
       return `
         <div class="hub-group">
-          <div class="hub-section-title">${grp}</div>
+          <div class="hub-section-title">${grpLabel}</div>
           <div class="hub-cards">
             ${items.map(p => `
               <div class="hub-card">
@@ -5408,7 +5409,7 @@ async function renderAdmin(app) {
       <div class="admin-tabs">
         <button class="admin-tab ${adminTab==='stats'?'active':''}" data-post-action="admin-switch-tab" data-tab="stats">${iconCut('home', 'ui-icon', 11, 11)}СТАТИСТИКА</button>
         <button class="admin-tab ${adminTab==='users'?'active':''}" data-post-action="admin-switch-tab" data-tab="users">${iconCut('profile', 'ui-icon', 11, 11)}ПОЛЬЗОВАТЕЛИ</button>
-        <button class="admin-tab ${adminTab==='drops'?'active':''}" data-post-action="admin-switch-tab" data-tab="drops">${iconCut('media', 'ui-icon', 11, 11)}DROPS</button>
+        <button class="admin-tab ${adminTab==='drops'?'active':''}" data-post-action="admin-switch-tab" data-tab="drops">${iconCut('media', 'ui-icon', 11, 11)}ДРОПЫ</button>
         <button class="admin-tab ${adminTab==='invites'?'active':''}" data-post-action="admin-switch-tab" data-tab="invites">${iconCut('add', 'ui-icon', 11, 11)}ИНВАЙТЫ</button>
         <button class="admin-tab ${adminTab==='reports'?'active':''}" data-post-action="admin-switch-tab" data-tab="reports">${iconCut('warning', 'ui-icon', 11, 11)}ЖАЛОБЫ</button>
         <button class="admin-tab ${adminTab==='verify'?'active':''}" data-post-action="admin-switch-tab" data-tab="verify">${iconCut('check', 'ui-icon', 11, 11)}ВЕРИФИКАЦИИ</button>
@@ -5437,19 +5438,19 @@ async function loadAdminTab() {
       const s = await api('/admin/stats');
       el.innerHTML = `
         <div class="admin-stats">
-          <div class="stat-card"><div class="stat-val">${s.users}</div><div class="stat-lbl">пользователей</div></div>
+          <div class="stat-card"><div class="stat-val">${s.users}</div><div class="stat-lbl">${pluralRu(s.users,'пользователь','пользователя','пользователей')}</div></div>
           <div class="stat-card"><div class="stat-val">${s.today}</div><div class="stat-lbl">новых сегодня</div></div>
-          <div class="stat-card"><div class="stat-val">${s.msgs}</div><div class="stat-lbl">сообщений</div></div>
+          <div class="stat-card"><div class="stat-val">${s.msgs}</div><div class="stat-lbl">${pluralRu(s.msgs,'сообщение','сообщения','сообщений')}</div></div>
           <div class="stat-card"><div class="stat-val">${s.msgToday}</div><div class="stat-lbl">сообщений сегодня</div></div>
-          <div class="stat-card"><div class="stat-val">${s.posts||0}</div><div class="stat-lbl">постов</div></div>
-          <div class="stat-card"><div class="stat-val">${s.comments||0}</div><div class="stat-lbl">комментариев</div></div>
-          <div class="stat-card"><div class="stat-val">${s.drops}</div><div class="stat-lbl">активных дропов</div></div>
-          <div class="stat-card"><div class="stat-val">${s.files||0}</div><div class="stat-lbl">файлов на диске</div></div>
-          <div class="stat-card"><div class="stat-val">${s.publicFiles||0}</div><div class="stat-lbl">публичных файлов</div></div>
-          <div class="stat-card"><div class="stat-val">${s.sessions||0}</div><div class="stat-lbl">сессий</div></div>
-          <div class="stat-card"><div class="stat-val">${s.banned}</div><div class="stat-lbl">забанено</div></div>
-          <div class="stat-card"><div class="stat-val">${s.admins}</div><div class="stat-lbl">администраторов</div></div>
-          <div class="stat-card"><div class="stat-val">${s.reports||0}</div><div class="stat-lbl">открытых жалоб</div></div>
+          <div class="stat-card"><div class="stat-val">${s.posts||0}</div><div class="stat-lbl">${pluralRu(s.posts||0,'пост','поста','постов')}</div></div>
+          <div class="stat-card"><div class="stat-val">${s.comments||0}</div><div class="stat-lbl">${pluralRu(s.comments||0,'комментарий','комментария','комментариев')}</div></div>
+          <div class="stat-card"><div class="stat-val">${s.drops}</div><div class="stat-lbl">${pluralRu(s.drops,'активный дроп','активных дропа','активных дропов')}</div></div>
+          <div class="stat-card"><div class="stat-val">${s.files||0}</div><div class="stat-lbl">${pluralRu(s.files||0,'файл на диске','файла на диске','файлов на диске')}</div></div>
+          <div class="stat-card"><div class="stat-val">${s.publicFiles||0}</div><div class="stat-lbl">${pluralRu(s.publicFiles||0,'публичный файл','публичных файла','публичных файлов')}</div></div>
+          <div class="stat-card"><div class="stat-val">${s.sessions||0}</div><div class="stat-lbl">${pluralRu(s.sessions||0,'сессия','сессии','сессий')}</div></div>
+          <div class="stat-card"><div class="stat-val">${s.banned}</div><div class="stat-lbl">${pluralRu(s.banned,'забанен','забанено','забанено')}</div></div>
+          <div class="stat-card"><div class="stat-val">${s.admins}</div><div class="stat-lbl">${pluralRu(s.admins,'администратор','администратора','администраторов')}</div></div>
+          <div class="stat-card"><div class="stat-val">${s.reports||0}</div><div class="stat-lbl">${pluralRu(s.reports||0,'открытая жалоба','открытых жалобы','открытых жалоб')}</div></div>
         </div>
       `;
     } else if (adminTab === 'users') {
