@@ -882,7 +882,7 @@ function renderNav() {
       { id: 'discover', html: navInner('search', 'Обзор'),          title: 'Все посты' },
       { id: 'artists',  html: navInner('profile', 'Артисты'),        title: 'Все пользователи' },
       { id: 'disk',     html: navInner('disk', 'Диск'),           title: 'Облачное хранилище' },
-      ...(me.is_admin ? [{ id: 'hub', html: navInner('settings', 'Hub'), title: 'Метрики и платформы' }] : []),
+      ...(me.is_admin ? [{ id: 'hub', html: navInner('settings', 'Хаб'), title: 'Метрики и платформы' }] : []),
       { sep: true },
       { id: 'chats',    html: `${navInner('comment', 'Чаты')}${me.unread_chats > 0 ? ` <span class="nav-badge">${me.unread_chats}</span>` : ''}`, title: 'Личные сообщения' },
       { id: 'notifs',   html: `${navInner('notifications', 'Уведомления')}${badge}`, title: 'Уведомления' },
@@ -5392,7 +5392,7 @@ async function saveHubKey(platformId) {
 async function refreshHubExternal() {
   try {
     await api('/hub/external?refresh=1');
-    toast.success('Hub обновлён');
+    toast.success('Хаб обновлён');
     await renderHub(document.getElementById('app'));
   } catch (e) {
     toast.error(e.message);
