@@ -2091,16 +2091,16 @@ function socialOverviewHtml(data) {
         </section>
       ` : ''}
       <section class="social-card">
-        <div class="social-card-head"><div><span>DISCOVERY GRAPH</span><strong>${stats.following || 0} following</strong></div></div>
+        <div class="social-card-head"><div><span>DISCOVERY GRAPH</span><strong>${stats.following || 0} подписок</strong></div></div>
         <div class="suggestion-list">${suggestions || '<div class="social-empty">Нет предложений</div>'}</div>
       </section>
       <section class="social-card">
-        <div class="social-card-head"><div><span>NETWORK SIGNAL</span><strong>${stats.notifications || 0} alerts</strong></div></div>
+        <div class="social-card-head"><div><span>NETWORK SIGNAL</span><strong>${stats.notifications || 0} сигналов</strong></div></div>
         <div class="trend-chips">${tags || '<div class="social-empty">Нет трендов</div>'}</div>
         <div class="mini-post-list">${hot || ''}</div>
       </section>
       <section class="social-card">
-        <div class="social-card-head"><div><span>LIVE DROPS</span><strong>${(data?.active_drops || []).length} active</strong></div></div>
+        <div class="social-card-head"><div><span>LIVE DROPS</span><strong>${(data?.active_drops || []).length} активных</strong></div></div>
         <div class="drop-mini-list">${drops || '<div class="social-empty">Подпишись на артистов или опубликуй дроп</div>'}</div>
       </section>
     </div>
@@ -3428,6 +3428,9 @@ function switchSettingsTab(tab, persist = true) {
   document.querySelectorAll('[data-settings-panel]').forEach(panel => {
     panel.classList.toggle('hidden', panel.dataset.settingsPanel !== settingsTab);
   });
+  // СОХРАНИТЬ only makes sense on profile and privacy tabs
+  const saveRow = document.querySelector('.settings-actions');
+  if (saveRow) saveRow.classList.toggle('hidden', !['profile', 'privacy'].includes(settingsTab));
 }
 
 function _beforeUnloadHandler(e) {
@@ -6549,7 +6552,7 @@ async function renderDrops(app) {
       ])}
       ${dropComposerHtml()}
       <div id="dropList" class="drop-list">${drops.length ? drops.map(dropHtml).join('') :
-        `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('media', 'ui-icon', 28, 28)}</div><div class="onboarding-title">DROPS EMPTY</div><div class="onboarding-text">Drop a moment, track views, and let it disappear on schedule.</div></div>`}</div>
+        `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('media', 'ui-icon', 28, 28)}</div><div class="onboarding-title">НЕТ ДРОПОВ</div><div class="onboarding-text">Брось момент, следи за просмотрами — исчезнет через 24ч.</div></div>`}</div>
     `;
     bindDropImg();
     bindMentionAutocomplete('dText', 'dMentionDrop');
