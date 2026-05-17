@@ -2230,7 +2230,7 @@ async function renderDiscover(app) {
     const posts = await api(`/discover?offset=0&limit=${discLimit}&sort=${encodeURIComponent(discoverSort)}`);
     const postsEl = document.getElementById('posts');
     if (postsEl) postsEl.innerHTML = posts.length ? posts.map(postHtml).join('') :
-        '<div class="empty">Пока нет постов. Будь первым.</div>';
+        `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('home', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Сеть пока молчит</div><div class="onboarding-text">Опубликуй первый пост — он появится здесь для всех</div></div>`;
     loadLinkPreviews(document.getElementById('app')).catch(()=>{});
     // initialise discover scroll state
     discOffset = posts.length;
@@ -2835,7 +2835,7 @@ async function renderArtists(app) {
       { label: 'signal', value: 'profiles', note: 'links and posts' },
     ])}
     <div class="search-wrap"><input class="input" id="artistsSearchInput" type="text" placeholder="Поиск артистов..."></div>
-    <div id="artList">${artists.length ? artists.map(artRow).join('') : '<div class="empty">Пока никого нет</div>'}</div>
+    <div id="artList">${artists.length ? artists.map(artRow).join('') : `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('profile', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Пока никого нет</div><div class="onboarding-text">Здесь появятся все артисты сети — зови друзей!</div></div>`}</div>
   `;
   const searchInput = document.getElementById('artistsSearchInput');
   if (searchInput) searchInput.addEventListener('input', e => searchArt(e.target.value));
@@ -2860,7 +2860,7 @@ function searchArt(q) {
   _st = setTimeout(async () => {
     if (!q.trim()) {
       const a = await api('/artists');
-      $('#artList').innerHTML = a.length ? a.map(artRow).join('') : '<div class="empty">Пока никого нет</div>';
+      $('#artList').innerHTML = a.length ? a.map(artRow).join('') : `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('profile', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Пока никого нет</div><div class="onboarding-text">Здесь появятся все артисты сети — зови друзей!</div></div>`;
       return;
     }
     const r = await api('/search?q=' + encodeURIComponent(q) + '&type=users');
@@ -5355,6 +5355,7 @@ async function renderHub(app) {
 
     <div class="hub-group">
       <div class="hub-section-title">API КЛЮЧИ <span style="opacity:0.4;font-weight:400">· кешируется 30 мин</span></div>
+      ${Object.values(ext).every(v => !v) ? `<div class="hub-hint">${iconCut('settings', 'ui-icon', 12, 12)} Добавь API ключи, чтобы видеть live-статистику платформ прямо здесь</div>` : ''}
       <div class="hub-keys">
         ${HUB_PLATFORMS.filter(p => p.keyHint).map(p => `
           <div class="hub-key-row">

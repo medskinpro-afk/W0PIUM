@@ -1355,11 +1355,15 @@ function main() {
         AND (d.user_id=? OR d.user_id IN (SELECT following_id FROM follows WHERE follower_id=?))
       ORDER BY d.created_at DESC LIMIT 4
     `, [req.uid, req.uid]);
+    // Follow threshold: min(3, other users in system) so it's always achievable
+    const otherUserCount = (get('SELECT COUNT(*) AS n FROM users WHERE id != ? AND banned_at IS NULL', [req.uid])?.n || 0);
+    const followThreshold = Math.max(1, Math.min(3, otherUserCount));
+    const followDone = stats.following >= followThreshold;
     const completion = [
       !!u.avatar,
       !!u.bio,
       !!(u.link_sc || u.link_ig || u.link_tg || u.link_spotify || u.link_site),
-      stats.following >= 3,
+      followDone,
       stats.posts > 0,
       stats.drops > 0,
     ].filter(Boolean).length;
@@ -1372,7 +1376,7 @@ function main() {
           { id: 'avatar', done: !!u.avatar, label: 'добавить фото' },
           { id: 'bio', done: !!u.bio, label: 'написать bio' },
           { id: 'links', done: !!(u.link_sc || u.link_ig || u.link_tg || u.link_spotify || u.link_site), label: 'добавить ссылки' },
-          { id: 'follow', done: stats.following >= 3, label: 'подписаться на 3' },
+          { id: 'follow', done: followDone, label: followThreshold === 1 ? 'подписаться' : `подписаться на ${followThreshold}` },
           { id: 'post', done: stats.posts > 0, label: 'первый пост' },
           { id: 'drop', done: stats.drops > 0, label: 'опубликовать дроп' },
         ],
@@ -3147,8 +3151,8 @@ function main() {
     res.json({
       ok: true,
       uptime: process.uptime(),
-      build: 'ui-polish-2.9',
-      app_version: '0.9.26',
+      build: 'ui-polish-3.0',
+      app_version: '0.9.27',
       db,
       social_schema,
     });
