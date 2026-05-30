@@ -530,7 +530,7 @@ async function loadChats() {
       let html = `${opiumCommandStrip('chats')}<div class="page-title-row"><span class="page-title page-title--ic">${iconCut('comment', 'ui-icon page-title-ic', 15, 15)}DM</span><div class="page-title-actions"><button class="btn btn-sm btn-ghost btn-ic-pad${chatListShowArchived ? ' active' : ''}" data-post-action="toggle-chat-list-archive" title="Архив">${iconCut('disk', 'ui-icon', 15, 15)} АРХИВ</button><button class="btn btn-sm btn-ghost btn-ic-pad" data-post-action="show-create-group-modal" title="Новая группа">${iconCut('add', 'ui-icon', 15, 15)} ГРУППА</button></div></div>${opiumMetricCards([
         { label: 'dialogs', value: accepted.length, note: 'active threads' },
         { label: 'requests', value: pending.length, note: 'pending inbox' },
-        { label: 'archive', value: chatListShowArchived ? 'open' : 'hidden', note: 'stored chats' },
+        { label: 'archive', value: chatListShowArchived ? 'open' : '—', note: 'stored chats' },
       ])}`;
       if (!chatListShowArchived && pending.length) {
         html += `<div class="dm-section-title">ЗАПРОСЫ (${pending.length})</div>` + pending.map(chatRow).join('');

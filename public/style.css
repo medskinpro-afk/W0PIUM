@@ -572,14 +572,21 @@ textarea.input { resize: vertical; min-height: 70px; line-height: 1.5; }
   transition: background .15s, color .15s, border-color .15s, transform .15s;
 }
 .opium-command:hover,
-.opium-command:focus-visible,
-.opium-command.active {
+.opium-command:focus-visible {
   color: var(--fg);
   background: var(--bg3);
   border-color: var(--border2);
   outline: none;
 }
-.opium-command:hover { transform: translateY(-1px); }
+.opium-command.active {
+  color: var(--fg);
+  background: var(--bg4);
+  border-color: var(--border2);
+  border-bottom-color: var(--accent);
+  border-bottom-width: 2px;
+  outline: none;
+}
+.opium-command:hover:not(.active) { transform: translateY(-1px); }
 .opium-command img.ui-icon { width: 13px; height: 13px; opacity: 0.82; }
 .opium-command.active img.ui-icon { opacity: 1; }
 .opium-metric-grid {
@@ -2803,7 +2810,9 @@ img.ui-icon {
   }
   .opium-command-strip::-webkit-scrollbar { display: none; }
   .opium-command { flex: 0 0 auto; }
-  .opium-metric-grid { grid-template-columns: 1fr; }
+  .opium-metric-grid { grid-template-columns: repeat(3, 1fr); }
+  .opium-metric-card { padding: 0.5rem 0.6rem; }
+  .opium-metric-card strong { font-size: 0.85rem; }
   .profile-nums { gap: 1.2rem; }
   .mobile-menu {
     top: 60px;
