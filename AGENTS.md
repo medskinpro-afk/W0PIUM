@@ -378,6 +378,141 @@ DATA_DIR="//MedSkin/docker/w0pium/data" PORT=3001 NODE_ENV=development node serv
 
 ---
 
+## Визуальный язык и брендинг W0PIUM
+
+W0PIUM — закрытая соцсеть для артистов. Эстетика: **raw, underground, минимализм**. Никаких ярких градиентов, никакого "стартап-глянца". Всё жёсткое, чёрное, монопространственное.
+
+### Цвета (CSS-переменные в `style.css`)
+
+**Тёмная тема (default):**
+```
+--bg:      #050505   фоновый чёрный
+--bg2:     #0c0c0c   карточки, панели
+--bg3:     #141414   вложенные элементы
+--bg4:     #1c1c1c   ховер, активные
+--fg:      #e8e8e8   основной текст
+--fg2:     #c2c2c2   вторичный текст
+--fg3:     #aaaaaa   мьютед
+--accent:  #ffffff   акцент (белый)
+--border:  rgba(255,255,255,0.07)
+--red:     #e84040
+--green:   #3ddc84
+--blue:    #4da6ff
+```
+
+**Светлая тема (`.light` на `<html>`):**
+```
+--bg:      #f5f3ef   тёплый бумажный белый
+--accent:  #8b6a40   тёплый бронза/охра
+```
+
+### Типографика
+
+| Применение | Шрифт |
+|---|---|
+| Основной UI | **Tektur** (variable, wght 400–700) |
+| Fallback | **Exo 2** (300–700) |
+| Моно / код | **Space Mono** (400, 700) |
+| Заголовки / лого | **Syncopate** (400, 700) |
+
+Все шрифты — Google Fonts, загружаются в `style.css`.  
+Логотип в навигации: `W<span class="logo-zero">Ø</span>PIUM` — буква Ø через CSS.
+
+### Иконки
+
+Иконки — PNG из папки `/icons_cut/` (кастомный спрайт-пак, не font-awesome).  
+В `app.js` — функция `iconCut(name, className, w, h)`:
+```js
+iconCut('home', 'ui-icon', 16, 16)
+// → <img src="/icons_cut/home.png" class="ui-icon" width="16" height="16" alt="">
+```
+
+На светлой теме иконки инвертируются CSS-фильтром (`.light nav .nav-icon-img { filter: brightness(0) ... }`).
+
+### Анимации
+
+- **Canvas-фон** (`#bg`): анимированные белые точки-частицы, связанные линиями. Запускается в `(function initCanvas(){...})()` в `app.js`.
+- **Smoke-переход** между страницами: `smokeTransition()` — появляется только при входе/выходе.
+- **Lightbox** для изображений: blur-фон, свайп для закрытия на мобильном.
+
+### Тон и язык интерфейса
+
+- **Основной язык UI: русский.** Все кнопки, метки, тосты — по-русски.
+- **Технические термины / бренд — английские:** FEED, DROPS, DISK, DM, W0PIUM, HUB.
+- Формат меток: `КАПСЛОК` для заголовков и кнопок, строчные для вторичного текста.
+- Никаких вопросительных знаков в UI. Никаких `.` в конце кнопок.
+
+---
+
+## Скрипты и автоматизация
+
+Все скрипты в папке `scripts/`. На NAS путь `/volume1/docker/w0pium/scripts/`.
+
+| Скрипт | Что делает |
+|---|---|
+| `auto-pipeline.sh` | Полный деплой: smoke → rebuild → healthcheck |
+| `predeploy-and-deploy.sh` | То же, но без smoke (если Playwright не установлен) |
+| `status-report.sh` | Health JSON + статус контейнера + последние 20 строк логов |
+| `checklist.sh` | Health + smoke, без деплоя |
+| `rollback-safe.sh` | Рестарт контейнера + healthcheck + логи |
+| `backup-db.sh` | Копия `data/w0pium.db` с датой, удаляет копии старше 7 дней |
+| `nightly-prod-smoke.sh` | Ночной smoke на продакшне (требует Playwright) |
+| `reset-wf-vf.js` | Сброс паролей защищённых аккаунтов `wf` / `vf` |
+| `npm-install.cmd` | npm install через `pushd` (обходит UNC-ограничение cmd.exe) |
+| `lint.cmd` / `lint.ps1` | ESLint без npm на UNC-пути |
+| `windows-docker-rebuild.ps1` | Rebuild через Docker Desktop на Windows |
+
+### DSM Task Scheduler (Synology)
+
+Задачи настроены в DSM → Task Scheduler (`synoscheduler/` в репо содержит их конфиги).
+
+```sh
+# Деплой (задача DSM):
+cd /volume1/docker/w0pium && sh scripts/predeploy-and-deploy.sh
+
+# Статус:
+cd /volume1/docker/w0pium && sh scripts/status-report.sh
+
+# Быстрый рестарт (только server.js, без rebuild):
+docker cp /volume1/docker/w0pium/server.js w0pium:/app/server.js && docker restart w0pium
+```
+
+---
+
+## QA и тестирование
+
+### Тест-аккаунты (НИКОГДА не удалять)
+
+| Username | Password | Роль |
+|---|---|---|
+| `wf` | `WF-W0PIUM-2026` | Главный admin |
+| `vf` | `VF-W0PIUM-2026` | Тестовый юзер |
+| `616` | спросить у владельца | Друг |
+
+Для разовых тестов создавать временных пользователей через DB, после теста удалять.
+
+### Playwright E2E
+
+```sh
+# Smoke на продакшне через Docker (не нужен локальный Playwright):
+cd /volume1/docker/w0pium && sh scripts/e2e-docker.sh smoke-prod
+
+# DM тест:
+DM_E2E_USER='testqa' DM_E2E_PASS='...' DM_E2E_TARGET='vf' npm run e2e:dm:prod
+```
+
+### Проверка деплоя
+
+```sh
+curl https://w0pium.walfir.com/api/health
+# → {"ok":true,"uptime":...,"build":"feature-name"}
+```
+
+Полный тест-чеклист — файл **`beta-test.md`** (80+ пунктов по всем разделам).  
+ChatGPT/агент-тестировщик промпт — **`beta-test-agent-prompt.md`**.
+
+---
+
 ## Работа с двумя параллельными агентами (Cursor)
 
 ### Концепция
