@@ -201,6 +201,7 @@ function safeUrl(u) {
 let msgPoll = null;
 let lastMsgTime = '';
 let eventSrc = null;
+let sseRetryDelay = 1000;
 let chatsCache = [];
 let chatListShowArchived = false;
 let currentChatId = null;
@@ -294,6 +295,24 @@ function sendMessageWithProgress(cid, formData, onProgress) {
     xhr.send(formData);
   });
 }
+function apiWithProgress(path, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api' + path);
+    if (csrfToken) xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable && typeof onProgress === 'function') onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || 'Error'));
+    };
+    xhr.send(formData);
+  });
+}
 
 // ── THEME ──
 function applyTheme(theme) {
@@ -361,6 +380,7 @@ function initEvents() {
   eventSrc = new EventSource('/api/events');
   eventSrc.onopen = () => {
     updateRealtimeStatus(false);
+    sseRetryDelay = 1000; // reset backoff on successful connection
   };
   eventSrc.addEventListener('message', async e => {
     const data = JSON.parse(e.data);
@@ -490,7 +510,9 @@ function initEvents() {
     updateRealtimeStatus(true);
     eventSrc.close();
     eventSrc = null;
-    setTimeout(initEvents, 3000);
+    const delay = sseRetryDelay;
+    sseRetryDelay = Math.min(sseRetryDelay * 2, 30_000); // max 30s
+    setTimeout(initEvents, delay);
   };
 }
 
@@ -864,7 +886,7 @@ async function init() {
     }
   });
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+    navigator.serviceWorker.register('/service-worker.js?v=' + APP_VERSION).catch(() => {});
     // Auto-reload when a new SW version takes over (ensures fresh JS after deploy)
     if (navigator.serviceWorker.controller) {
       navigator.serviceWorker.addEventListener('controllerchange', () => {
@@ -961,6 +983,21 @@ function initUiDelegates() {
   if (window.__uiDelegatesBound) return;
   window.__uiDelegatesBound = true;
 
+const _prefetchCache = {};
+function prefetchPage(pageName, pageParam) {
+  const key = pageName + '|' + (pageParam || '');
+  if (_prefetchCache[key]) return;
+  _prefetchCache[key] = true;
+  // Prefetch API data for common pages
+  const url = pageName === 'feed' ? '/api/feed'
+    : pageName === 'chats' ? '/api/chats'
+    : pageName === 'discover' ? '/api/discover'
+    : pageName === 'notifs' ? '/api/notifications'
+    : pageName === 'disk' ? '/api/disk'
+    : pageName === 'artists' ? '/api/artists'
+    : null;
+  if (url) fetch(url, { credentials: 'include', priority: 'low' }).catch(() => {});
+}
   document.addEventListener('click', async ev => {
     if (
       document.body.classList.contains('menu-open') &&
@@ -1391,6 +1428,13 @@ function initUiDelegates() {
       dragEl.classList.remove('dragging-file');
     }
   });
+
+  // Prefetch on nav item hover
+  document.addEventListener('mouseenter', ev => {
+    const navItem = ev.target.closest('.nav-item[data-nav-action]');
+    if (!navItem || navItem.dataset.navAction !== 'go') return;
+    prefetchPage(navItem.dataset.navPage || '', navItem.dataset.navParam || undefined);
+  }, true);
 }
 
 // ── ROUTER ──
@@ -1826,6 +1870,7 @@ async function loadLinkPreviews(container) {
         img.src = safeUrl(data.image) || '';
         img.alt = '';
         img.className = 'link-preview-img';
+        img.loading = 'lazy';
         img.onerror = () => { img.style.display = 'none'; };
         a.appendChild(img);
       }
@@ -5522,7 +5567,7 @@ async function loadAdminTab() {
       if (!drops.length) { el.innerHTML = '<div class="empty">Нет drops</div>'; return; }
       el.innerHTML = `<div class="admin-list">${drops.map(d => `
         <div class="admin-row" id="adrop-${esc(d.id)}">
-          ${d.image ? `<img class="admin-drop-thumb" src="${esc(d.image)}" alt="">` : '<div class="admin-drop-thumb no-img"></div>'}
+          ${d.image ? `<img class="admin-drop-thumb" src="${esc(d.image)}" alt="" loading="lazy">` : '<div class="admin-drop-thumb no-img"></div>'}
           <div class="admin-row-info">
             <span class="admin-row-name">${esc(d.display_name)} <span class="fg3">@${esc(d.username)}</span></span>
             <span class="admin-row-meta">${esc(d.content||'—')} · ${d.views} просмотров · ${timeAgo(d.created_at)}</span>
@@ -7479,7 +7524,11 @@ async function uploadDiskFiles(fileList) {
       const fd = new FormData();
       fd.append('file', file);
       if (diskCurrentFolder) fd.append('folder_id', diskCurrentFolder);
-      await api('/disk', { method: 'POST', body: fd });
+      await apiWithProgress('/disk', fd, p => {
+        if (!progress) return;
+        const totalPct = Math.round(((done + p / 100) / files.length) * 100);
+        progress.innerHTML = `<div class="disk-prog-bar"><div class="disk-prog-fill" style="width:${totalPct}%"></div></div><span>${file.name}: ${p}%</span>`;
+      });
       done++; upd();
     } catch (e) { toast.error(`${file.name}: ${e.message}`); }
   }

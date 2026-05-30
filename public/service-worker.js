@@ -15,6 +15,7 @@ const CACHE_NAME = `w0pium-${CACHE_VER}`;
 // JS + CSS are NOT precached — always network-first so deploys show instantly
 // '/' is intentionally excluded — served network-first via navigate handler
 const PRECACHE = [
+  '/',
   '/utils/toast.js',
   '/utils/cn.js',
   '/pages/chat.js',

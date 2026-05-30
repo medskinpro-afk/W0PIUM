@@ -92,6 +92,7 @@ const limiterReport   = _rl({ windowMs: 60_000, limit: 5, keyGenerator: req => r
 const limiterExport = _rl({ windowMs: 3_600_000, limit: 3, keyGenerator: req => req.uid || req.ip, message: 'Подожди немного' });
 const limiterPlay   = _rl({ windowMs: 60_000, limit: 30, keyGenerator: req => req.ip });
 const limiterFiles    = _rl({ windowMs: 60_000, limit: 120, keyGenerator: req => req.uid || req.ip });
+const limiterMsgImages = _rl({ windowMs: 60_000, limit: 300, keyGenerator: req => req.uid || req.ip });
 const limiterDmSearch = _rl({ windowMs: 60_000, limit: 30, keyGenerator: req => req.uid || req.ip });
 const limiterTyping   = _rl({ windowMs: 10_000,  limit: 10, keyGenerator: req => req.uid || req.ip });
 const limiterReact    = _rl({ windowMs: 60_000,  limit: 30, keyGenerator: req => req.uid || req.ip });
@@ -152,7 +153,7 @@ async function isSsrfBlocked(rawUrl) {
     // Resolve to IP and re-check — catches non-standard formats and DNS rebinding
     const { address } = await dns.lookup(hostname, { verbatim: false });
     return _ssrfBlockedRe.test(address);
-  } catch (e) { logger.debug({ url: rawUrl?.slice(0, 50), error: e.message }, 'SSRF check failed - blocking'); return true; }
+  } catch (e) { logger.trace({ url: rawUrl?.slice(0, 50), error: e.message }, 'SSRF check failed - blocking'); return true; }
 }
 
 let db;
@@ -401,7 +402,7 @@ function main() {
     'CREATE TABLE IF NOT EXISTS comment_likes (comment_id TEXT NOT NULL, user_id TEXT NOT NULL, created_at DATETIME DEFAULT (datetime(\'now\')), PRIMARY KEY (comment_id, user_id), FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)',
     'CREATE INDEX IF NOT EXISTS idx_comments_post_parent ON comments(post_id, parent_id, created_at)',
     'CREATE INDEX IF NOT EXISTS idx_comment_likes_comment ON comment_likes(comment_id)',
-  ].forEach(s => { try { db.exec(s); } catch (e) { logger.debug({ sql: s.slice(0, 60), error: e.message }, 'migration skipped'); } });
+  ].forEach(s => { try { db.exec(s); } catch (e) { logger.trace({ sql: s.slice(0, 60), error: e.message }, 'migration skipped'); } });
   try { run(`UPDATE background_jobs SET status='pending', updated_at=datetime('now') WHERE status='running'`); } catch (e) { logger.warn({ error: e.message }, 'background jobs reset failed'); }
   // FTS5 for full-text post search
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(content, post_id UNINDEXED, tokenize='unicode61')`);
@@ -417,18 +418,18 @@ function main() {
   // Populate FTS for existing posts (idempotent via INSERT OR IGNORE)
   try {
     db.exec(`INSERT OR IGNORE INTO posts_fts(content, post_id) SELECT content, id FROM posts WHERE content != ''`);
-  } catch (e) { logger.debug({ error: e.message }, 'FTS population failed'); }
+  } catch (e) { logger.trace({ error: e.message }, 'FTS population failed'); }
 
   // backfill expires_at for drops that have none
-  try { db.exec('UPDATE drops SET expires_at=datetime(created_at,\'+24 hours\') WHERE expires_at IS NULL'); } catch (e) { logger.debug({ error: e.message }, 'drops expires_at backfill failed'); }
+  try { db.exec('UPDATE drops SET expires_at=datetime(created_at,\'+24 hours\') WHERE expires_at IS NULL'); } catch (e) { logger.trace({ error: e.message }, 'drops expires_at backfill failed'); }
   // Grandfather existing users — they registered before email verification was required
-  try { db.exec('UPDATE users SET email_verified=1 WHERE email=\'\' OR email IS NULL'); } catch (e) { logger.debug({ error: e.message }, 'users email_verified grandfathering failed'); }
+  try { db.exec('UPDATE users SET email_verified=1 WHERE email=\'\' OR email IS NULL'); } catch (e) { logger.trace({ error: e.message }, 'users email_verified grandfathering failed'); }
   // Legacy bootstrap is disabled by default; enable only for one-off recovery.
   if (process.env.BOOTSTRAP_ADMIN_USERNAME) {
     try {
       run('UPDATE users SET is_admin=1 WHERE username=?', [process.env.BOOTSTRAP_ADMIN_USERNAME]);
       logger.warn(`bootstrap_admin: granted admin to ${process.env.BOOTSTRAP_ADMIN_USERNAME}`);
-    } catch (e) { logger.debug({ error: e.message }, 'bootstrap admin failed'); }
+    } catch (e) { logger.trace({ error: e.message }, 'bootstrap admin failed'); }
   }
 
   // Performance indexes
@@ -498,7 +499,7 @@ function main() {
   app.use('/icons_cut', express.static(p.join(__dirname, 'icons_cut')));
   app.use('/avatars',    express.static(AVA_DIR));
   app.use('/images',     express.static(IMG_DIR));
-  app.get('/msg_images/:file', auth, limiterFiles, (req, res) => {
+  app.get('/msg_images/:file', auth, limiterMsgImages, (req, res) => {
     const fname = req.params.file;
     const allowed = get(
       `SELECT m.id FROM messages m JOIN conversation_members cm ON cm.conv_id=m.conv_id WHERE m.file=? AND cm.user_id=? LIMIT 1`,
@@ -586,7 +587,7 @@ function main() {
       if (!crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expPad))) {
         return res.status(403).json({ error:'Неверный CSRF-токен' });
       }
-    } catch (e) { logger.debug({ error: e.message }, 'CSRF timingSafeEqual failed'); return res.status(403).json({ error:'Неверный CSRF-токен' }); }
+    } catch (e) { logger.trace({ error: e.message }, 'CSRF timingSafeEqual failed'); return res.status(403).json({ error:'Неверный CSRF-токен' }); }
     next();
   }
   function notify(userId, fromId, type, refId) {
@@ -623,7 +624,7 @@ function main() {
     const list = clients.get(userId);
     if (!list) return;
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    list.forEach(res => { try { res.write(payload); } catch (e) { logger.debug({ userId, event, error: e.message }, 'SSE write failed'); } });
+    list.forEach(res => { try { res.write(payload); } catch (e) { logger.trace({ userId, event, error: e.message }, 'SSE write failed'); } });
   }
   function genCode() { return crypto.randomBytes(4).toString('hex').toUpperCase().slice(0,6); }
   function ensureInviteCode(userId) {
@@ -659,21 +660,21 @@ function main() {
     // Disk files (+ async-generated previews)
     all('SELECT path, preview_path FROM disk_files WHERE user_id=?', [uid])
       .forEach(f => {
-        try { if (f.path) fs.unlinkSync(p.join(DATA, f.path.replace(/^\//, ''))); } catch (e) { logger.debug({ path: f.path, error: e.message }, 'failed to delete disk file'); }
-        try { if (f.preview_path) fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch (e) { logger.debug({ preview: f.preview_path, error: e.message }, 'failed to delete preview'); }
+        try { if (f.path) fs.unlinkSync(p.join(DATA, f.path.replace(/^\//, ''))); } catch (e) { logger.trace({ path: f.path, error: e.message }, 'failed to delete disk file'); }
+        try { if (f.preview_path) fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch (e) { logger.trace({ preview: f.preview_path, error: e.message }, 'failed to delete preview'); }
       });
     // Avatar
     const u = get('SELECT avatar FROM users WHERE id=?', [uid]);
-    if (u?.avatar) try { fs.unlinkSync(p.join(DATA, u.avatar.replace(/^\//, ''))); } catch (e) { logger.debug({ avatar: u.avatar, error: e.message }, 'failed to delete avatar'); }
+    if (u?.avatar) try { fs.unlinkSync(p.join(DATA, u.avatar.replace(/^\//, ''))); } catch (e) { logger.trace({ avatar: u.avatar, error: e.message }, 'failed to delete avatar'); }
     // Post images
     all('SELECT image FROM posts WHERE user_id=? AND image IS NOT NULL AND image != \'\'', [uid])
-      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch (e) { logger.debug({ image: r.image, error: e.message }, 'failed to delete post image'); } });
+      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch (e) { logger.trace({ image: r.image, error: e.message }, 'failed to delete post image'); } });
     // Message file attachments
     all('SELECT file FROM messages WHERE sender_id=? AND file IS NOT NULL AND file != \'\'', [uid])
-      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.file.replace(/^\//, ''))); } catch (e) { logger.debug({ file: r.file, error: e.message }, 'failed to delete message file'); } });
+      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.file.replace(/^\//, ''))); } catch (e) { logger.trace({ file: r.file, error: e.message }, 'failed to delete message file'); } });
     // Drop images
     all('SELECT image FROM drops WHERE user_id=? AND image IS NOT NULL AND image != \'\'', [uid])
-      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch (e) { logger.debug({ image: r.image, error: e.message }, 'failed to delete drop image'); } });
+      .forEach(r => { try { fs.unlinkSync(p.join(DATA, r.image.replace(/^\//, ''))); } catch (e) { logger.trace({ image: r.image, error: e.message }, 'failed to delete drop image'); } });
   }
 
   async function processImage(srcPath, destDir, opts = {}) {
@@ -794,7 +795,7 @@ function main() {
         if (e.statusCode === 410 || e.statusCode === 404) {
           run('DELETE FROM push_subscriptions WHERE endpoint=?', [sub.endpoint]);
         } else {
-          logger.debug({ endpoint: sub.endpoint.slice(0, 30), error: e.message }, 'push notification failed');
+          logger.trace({ endpoint: sub.endpoint.slice(0, 30), error: e.message }, 'push notification failed');
         }
       }
     }
@@ -989,7 +990,7 @@ function main() {
       // fallback: just rename as-is
       const ext = p.extname(req.file.originalname) || '.jpg';
       const nm = req.uid + ext;
-      try { fs.renameSync(req.file.path, p.join(AVA_DIR, nm)); } catch (e) { logger.debug({ path: req.file.path, error: e.message }, 'failed to rename avatar fallback'); }
+      try { fs.renameSync(req.file.path, p.join(AVA_DIR, nm)); } catch (e) { logger.trace({ path: req.file.path, error: e.message }, 'failed to rename avatar fallback'); }
       run('UPDATE users SET avatar=? WHERE id=?', ['/avatars/'+nm, req.uid]);
       res.json({ avatar: '/avatars/'+nm });
     }
@@ -1044,7 +1045,7 @@ function main() {
       run('INSERT INTO follows (follower_id,following_id) VALUES(?,?)', [req.uid, req.params.id]);
       notify(req.params.id, req.uid, 'follow', '');
       pushEvent(req.params.id, 'notif', { type:'follow', ref:'' });
-    } catch (e) { logger.debug({ error: e.message }, 'follow notification failed'); }
+    } catch (e) { logger.trace({ error: e.message }, 'follow notification failed'); }
     res.json({ ok:1 });
   });
   app.delete('/api/follow/:id', auth, limiterFollow, (req, res) => {
@@ -1063,7 +1064,7 @@ function main() {
   app.post('/api/follow-requests/:id/accept', auth, limiterFollow, (req, res) => {
     const row = get('SELECT from_id FROM follow_requests WHERE id=? AND to_id=?', [req.params.id, req.uid]);
     if (!row) return res.status(404).json({ error:'not found' });
-    try { run('INSERT INTO follows (follower_id,following_id) VALUES(?,?)', [row.from_id, req.uid]); } catch (e) { logger.debug({ from_id: row.from_id, to_id: req.uid, error: e.message }, 'follow request accept insert failed'); }
+    try { run('INSERT INTO follows (follower_id,following_id) VALUES(?,?)', [row.from_id, req.uid]); } catch (e) { logger.trace({ from_id: row.from_id, to_id: req.uid, error: e.message }, 'follow request accept insert failed'); }
     run('DELETE FROM follow_requests WHERE id=?', [req.params.id]);
     run('DELETE FROM notifications WHERE user_id=? AND from_id=? AND type=?', [req.uid, row.from_id, 'follow_request']);
     notify(row.from_id, req.uid, 'follow', '');
@@ -1097,10 +1098,10 @@ function main() {
         const nm = await processImage(req.file.path, IMG_DIR, { width: 1200, fit: 'inside' });
         image = '/images/' + nm;
       } catch (e) {
-        logger.debug({ path: req.file.path, error: e.message }, 'image processing failed, using fallback');
+        logger.trace({ path: req.file.path, error: e.message }, 'image processing failed, using fallback');
         const ext = p.extname(req.file.originalname) || '.jpg';
         const nm = uuidv4() + ext;
-        try { fs.renameSync(req.file.path, p.join(IMG_DIR, nm)); } catch (e2) { logger.debug({ path: req.file.path, error: e2.message }, 'failed to rename uploaded image'); }
+        try { fs.renameSync(req.file.path, p.join(IMG_DIR, nm)); } catch (e2) { logger.trace({ path: req.file.path, error: e2.message }, 'failed to rename uploaded image'); }
         image = '/images/' + nm;
       }
     }
@@ -1112,7 +1113,7 @@ function main() {
     }
     // create poll if options provided
     let pollOptions=[];
-    try { pollOptions=JSON.parse(req.body.poll_options||'[]'); } catch (e) { logger.debug({ poll_options: req.body.poll_options, error: e.message }, 'failed to parse poll options'); }
+    try { pollOptions=JSON.parse(req.body.poll_options||'[]'); } catch (e) { logger.trace({ poll_options: req.body.poll_options, error: e.message }, 'failed to parse poll options'); }
     pollOptions=(pollOptions||[]).filter(o=>typeof o==='string'&&o.trim()).slice(0,4);
     if (pollOptions.length>=2) {
       const pollId=uuidv4();
@@ -1577,7 +1578,7 @@ function main() {
       run('INSERT INTO likes (user_id,post_id) VALUES(?,?)',[req.uid,req.params.id]);
       const po=get('SELECT user_id FROM posts WHERE id=?',[req.params.id]);
       if (po) { notify(po.user_id,req.uid,'like',req.params.id); pushEvent(po.user_id,'notif',{type:'like',ref:req.params.id}); }
-    } catch (e) { logger.debug({ post_id: req.params.id, error: e.message }, 'like notification failed'); }
+    } catch (e) { logger.trace({ post_id: req.params.id, error: e.message }, 'like notification failed'); }
     res.json({ likes:get('SELECT COUNT(*) AS c FROM likes WHERE post_id=?',[req.params.id]).c });
   });
   app.delete('/api/posts/:id/like', auth, limiterLike, (req, res) => {
@@ -1619,7 +1620,7 @@ function main() {
       run('DELETE FROM bookmarks WHERE user_id=? AND post_id=?', [req.uid, req.params.id]);
       res.json({ bookmarked: false });
     } else {
-      try { run('INSERT INTO bookmarks (user_id,post_id) VALUES(?,?)', [req.uid, req.params.id]); } catch (e) { logger.debug({ post_id: req.params.id, error: e.message }, 'bookmark insert failed'); }
+      try { run('INSERT INTO bookmarks (user_id,post_id) VALUES(?,?)', [req.uid, req.params.id]); } catch (e) { logger.trace({ post_id: req.params.id, error: e.message }, 'bookmark insert failed'); }
       res.json({ bookmarked: true });
     }
   });
@@ -1912,7 +1913,7 @@ function main() {
         url
       });
     } catch (e) {
-      logger.debug({ url, error: e.message }, 'link preview fetch failed');
+      logger.trace({ url, error: e.message }, 'link preview fetch failed');
       res.status(200).json({});
     }
   });
@@ -1930,10 +1931,10 @@ function main() {
         const nm = await processImage(req.file.path, IMG_DIR, { width: 1200, fit: 'inside' });
         image = '/images/' + nm;
       } catch (e) {
-        logger.debug({ path: req.file.path, error: e.message }, 'drop image processing failed, using fallback');
+        logger.trace({ path: req.file.path, error: e.message }, 'drop image processing failed, using fallback');
         const ext = p.extname(req.file.originalname) || '.jpg';
         const nm = uuidv4() + ext;
-        try { fs.renameSync(req.file.path, p.join(IMG_DIR, nm)); } catch (e2) { logger.debug({ path: req.file.path, error: e2.message }, 'failed to rename drop image'); }
+        try { fs.renameSync(req.file.path, p.join(IMG_DIR, nm)); } catch (e2) { logger.trace({ path: req.file.path, error: e2.message }, 'failed to rename drop image'); }
         image = '/images/' + nm;
       }
     }
@@ -1944,13 +1945,13 @@ function main() {
   });
   app.delete('/api/drops/:id', auth, (req, res) => {
     const d = get('SELECT image FROM drops WHERE id=? AND user_id=?', [req.params.id, req.uid]);
-    if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch (e) { logger.debug({ image: d.image, error: e.message }, 'failed to delete user drop image'); }
+    if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch (e) { logger.trace({ image: d.image, error: e.message }, 'failed to delete user drop image'); }
     run('DELETE FROM drops WHERE id=? AND user_id=?',[req.params.id,req.uid]); res.json({ ok:1 });
   });
   app.post('/api/drops/:id/view', auth, (req, res) => {
     const drop = get('SELECT user_id FROM drops WHERE id=?',[req.params.id]);
     if (drop && drop.user_id !== req.uid) {
-      try { run('INSERT INTO drop_views (drop_id,user_id) VALUES(?,?)',[req.params.id,req.uid]); } catch (e) { logger.debug({ drop_id: req.params.id, error: e.message }, 'failed to record drop view'); }
+      try { run('INSERT INTO drop_views (drop_id,user_id) VALUES(?,?)',[req.params.id,req.uid]); } catch (e) { logger.trace({ drop_id: req.params.id, error: e.message }, 'failed to record drop view'); }
     }
     res.json({ ok:1 });
   });
@@ -2102,7 +2103,7 @@ function main() {
       logger.error(e, 'group avatar failed');
       const ext = p.extname(req.file.originalname) || '.jpg';
       const nm = uuidv4() + ext;
-      try { fs.renameSync(req.file.path, p.join(AVA_DIR, nm)); } catch (e2) { logger.debug({ path: req.file.path, error: e2.message }, 'failed to rename group avatar'); }
+      try { fs.renameSync(req.file.path, p.join(AVA_DIR, nm)); } catch (e2) { logger.trace({ path: req.file.path, error: e2.message }, 'failed to rename group avatar'); }
       const avatar = '/avatars/' + nm;
       run('UPDATE conversations SET avatar=? WHERE id=?', [avatar, cid]);
       res.json({ ok: 1, avatar });
@@ -2624,7 +2625,7 @@ function main() {
           }
         }
       }
-    } catch (e) { logger.debug({ platform, error: e.message }, 'platform stats fetch failed'); }
+    } catch (e) { logger.trace({ platform, error: e.message }, 'platform stats fetch failed'); }
     return null;
   }
 
@@ -2785,7 +2786,7 @@ function main() {
 
   app.delete('/api/admin/drops/:id', adminAuth, (req, res) => {
     const d = get('SELECT image FROM drops WHERE id=?', [req.params.id]);
-    if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch (e) { logger.debug({ image: d.image, error: e.message }, 'failed to delete admin drop image'); }
+    if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch (e) { logger.trace({ image: d.image, error: e.message }, 'failed to delete admin drop image'); }
     run('DELETE FROM drops WHERE id=?', [req.params.id]);
     res.json({ ok:1 });
   });
@@ -2963,8 +2964,8 @@ function main() {
     if (!f) return res.status(404).json({ error: 'Not found' });
     const u = get('SELECT is_admin FROM users WHERE id=?', [req.uid]);
     if (f.user_id !== req.uid && !u?.is_admin) return res.status(403).json({ error: 'forbidden' });
-    try { fs.unlinkSync(p.join(DATA, f.path.replace(/^\/disk\//, 'disk/'))); } catch (e) { logger.debug({ path: f.path, error: e.message }, 'failed to delete disk file'); }
-    if (f.preview_path) try { fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch (e) { logger.debug({ preview: f.preview_path, error: e.message }, 'failed to delete disk preview'); }
+    try { fs.unlinkSync(p.join(DATA, f.path.replace(/^\/disk\//, 'disk/'))); } catch (e) { logger.trace({ path: f.path, error: e.message }, 'failed to delete disk file'); }
+    if (f.preview_path) try { fs.unlinkSync(p.join(DATA, f.preview_path.replace(/^\//, ''))); } catch (e) { logger.trace({ preview: f.preview_path, error: e.message }, 'failed to delete disk preview'); }
     run('DELETE FROM disk_files WHERE id=?', [req.params.id]);
     res.json({ ok: 1 });
   });
@@ -3051,8 +3052,8 @@ function main() {
     toDelete.forEach(fid => {
       const files = all('SELECT path, preview_path FROM disk_files WHERE folder_id=?', [fid]);
       files.forEach(file => {
-        try { fs.unlinkSync(p.join(DATA, file.path.replace(/^\/disk\//, 'disk/'))); } catch (e) { logger.debug({ path: file.path, error: e.message }, 'failed to delete folder disk file'); }
-        if (file.preview_path) try { fs.unlinkSync(p.join(DATA, file.preview_path.replace(/^\//, ''))); } catch (e) { logger.debug({ preview: file.preview_path, error: e.message }, 'failed to delete folder disk preview'); }
+        try { fs.unlinkSync(p.join(DATA, file.path.replace(/^\/disk\//, 'disk/'))); } catch (e) { logger.trace({ path: file.path, error: e.message }, 'failed to delete folder disk file'); }
+        if (file.preview_path) try { fs.unlinkSync(p.join(DATA, file.preview_path.replace(/^\//, ''))); } catch (e) { logger.trace({ preview: file.preview_path, error: e.message }, 'failed to delete folder disk preview'); }
       });
       run('DELETE FROM disk_files WHERE folder_id=?', [fid]);
       run('DELETE FROM disk_folders WHERE id=?', [fid]);
@@ -3084,7 +3085,7 @@ function main() {
     arc.pipe(res);
     files.forEach(f => {
       const filePath = p.join(DATA, f.path.replace(/^\/disk\//, 'disk/'));
-      try { if (fs.existsSync(filePath)) arc.file(filePath, { name: f.name }); } catch (e) { logger.debug({ path: filePath, error: e.message }, 'ZIP add file failed'); }
+      try { if (fs.existsSync(filePath)) arc.file(filePath, { name: f.name }); } catch (e) { logger.trace({ path: filePath, error: e.message }, 'ZIP add file failed'); }
     });
     arc.finalize();
   });
@@ -3198,6 +3199,7 @@ function main() {
       app_version: APP_VERSION,
       db,
       social_schema,
+      recent_errors: RECENT_ERRORS.slice(-5).reverse(),
     });
   });
 
