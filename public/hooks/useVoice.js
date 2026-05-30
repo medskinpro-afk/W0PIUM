@@ -88,7 +88,7 @@
     function stopAnalyser() {
       if (animFrame) cancelAnimationFrame(animFrame);
       animFrame = null;
-      if (audioCtx) { try { audioCtx.close(); } catch {} audioCtx = null; }
+      if (audioCtx) { try { audioCtx.close(); } catch (e) { console.debug('audioCtx.close failed:', e.message); } audioCtx = null; }
       analyser = null;
     }
 

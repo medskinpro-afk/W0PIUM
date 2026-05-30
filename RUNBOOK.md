@@ -26,6 +26,12 @@ Shows:
 - smoke check result
 - container status
 
+Override target health endpoint (optional):
+
+```sh
+W0PIUM_HEALTH_URL="https://staging.example.com/api/health" sh scripts/status-report.sh
+```
+
 ## 3) Safe manual deploy gate
 
 ```sh

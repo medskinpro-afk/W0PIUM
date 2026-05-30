@@ -9,7 +9,7 @@ cd "$ROOT_DIR"
 echo "==> Checklist started: $(date)"
 
 echo "==> 1/2 Health check"
-curl -fsS --max-time 30 https://w0pium.walfir.com/api/health
+curl -fsS --max-time 30 "$W0PIUM_HEALTH_URL"
 echo
 
 echo "==> 2/2 Smoke tests"

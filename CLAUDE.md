@@ -117,7 +117,7 @@ All design tokens live in `:root {}` in `style.css`; light overrides use same va
   - Static assets: cache-first
   - `/api/*` and `/disk/*`: network-only (never cached)
   - SPA shell: network-first with fallback to cache
-- Icons: `public/icons/icon-192.png` and `icon-512.png` (add manually)
+- Icons: `public/icons/icon-192.svg` and `public/icons/icon-512.svg`
 
 ## Database Patterns
 
@@ -203,3 +203,71 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
 
 Prefixes: `feat`, `fix`, `refactor`, `style`, `docs`, `chore`
+
+## Slash Commands
+
+Available via `/` in Claude Code (`.claude/commands/`).
+
+### Session flow
+| Command | Purpose |
+|---------|---------|
+| `/session-start` | Orient to codebase, load context, set goals |
+| `/session-end` | Summarise work done, next steps, clean up |
+| `/understand` | Deep-read a file/module and explain it |
+
+### Code quality
+| Command | Purpose |
+|---------|---------|
+| `/review` | Full code review — bugs, style, security |
+| `/refactor` | Suggest + apply refactoring |
+| `/security-scan` | Surface security issues |
+| `/predict-issues` | Spot likely future bugs before they happen |
+| `/fix-imports` | Clean up unused/broken imports |
+| `/remove-comments` | Strip redundant comments |
+| `/format` | Auto-format changed files |
+| `/make-it-pretty` | UI/CSS polish pass |
+
+### Development
+| Command | Purpose |
+|---------|---------|
+| `/implement` | Scaffold a new feature end-to-end |
+| `/scaffold` | Generate boilerplate for a new component/route |
+| `/fix-todos` | Resolve existing TODO comments in code |
+| `/create-todos` | Create structured TODO list for a feature |
+| `/find-todos` | List all TODOs across the codebase |
+| `/test` | Write/run tests for a module |
+| `/explain-like-senior` | Plain-English explanation of complex code |
+
+### Project management
+| Command | Purpose |
+|---------|---------|
+| `/docs` | Generate or update documentation |
+| `/contributing` | Review contribution guidelines |
+| `/todos-to-issues` | Convert TODOs to tracked issues |
+| `/cleanproject` | Remove dead files, logs, temp artifacts |
+| `/commit` | Stage + commit with proper message |
+| `/undo` | Revert last change safely |
+
+### SuperClaude analysis
+| Command | Purpose |
+|---------|---------|
+| `/sc-analyze` | Deep multi-angle code/arch analysis |
+| `/sc-improve` | Targeted improvement with tradeoffs |
+| `/sc-troubleshoot` | Systematic debug + root-cause |
+| `/sc-build` | Plan and execute a build task |
+| `/sc-design` | Architecture / API design session |
+| `/sc-document` | Comprehensive docs generation |
+| `/sc-research` | Research a tech topic in context |
+| `/sc-brainstorm` | Structured ideation session |
+| `/sc-estimate` | Effort + complexity estimate |
+| `/sc-spawn` | Break work into parallel sub-tasks |
+
+### Webwright — browser automation
+Drives a local headless Firefox via Playwright. Requires `playwright install firefox` once.
+
+| Command | Purpose |
+|---------|---------|
+| `/webwright:run <task>` | One-shot: solve a web task, save screenshots + log |
+| `/webwright:craft <task>` | Parameterized: turn web task into reusable CLI script |
+
+Use for scraping, form-filling, multi-step web flows, or any task that needs a real browser.

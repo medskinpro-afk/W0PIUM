@@ -16,7 +16,9 @@ services:
     container_name: w0pium
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Secure default: local host only. Put remote access behind the explicit
+      # cloudflared profile below or a VPN/authenticated reverse proxy.
+      - "${W0PIUM_BIND_ADDR:-127.0.0.1}:${W0PIUM_HOST_PORT:-3000}:3000"
     volumes:
       # Persist DB and user media only (see file header for public/)
       - ./data:/data
@@ -34,8 +36,10 @@ services:
       start_period: 10s
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.3.0
     container_name: w0pium-cloudflared
+    profiles:
+      - remote-tunnel
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:

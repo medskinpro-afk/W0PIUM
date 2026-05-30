@@ -9,7 +9,7 @@ cd "$ROOT_DIR"
 echo "==> Status report: $(date)"
 
 echo "==> Health"
-curl -fsS --max-time 30 https://w0pium.walfir.com/api/health
+curl -fsS --max-time 30 "$W0PIUM_HEALTH_URL"
 echo
 
 echo "==> Container state"

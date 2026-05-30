@@ -1,12 +1,20 @@
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
+
+const publicRoot = fileURLToPath(new URL('./public', import.meta.url));
 
 export default defineConfig({
   // Serve public/ as the project root so index.html is the entry point
-  root: 'public',
+  root: publicRoot,
 
   build: {
     outDir: '../dist',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        app: fileURLToPath(new URL('./public/index.html', import.meta.url)),
+      },
+    },
   },
 
   server: {

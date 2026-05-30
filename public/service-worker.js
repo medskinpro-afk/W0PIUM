@@ -9,7 +9,7 @@
  *   SPA shell      → Network First, fallback to cache
  */
 
-const CACHE_VER = 'v33';
+const CACHE_VER = 'v48';
 const CACHE_NAME = `w0pium-${CACHE_VER}`;
 
 // JS + CSS are NOT precached — always network-first so deploys show instantly
@@ -102,12 +102,12 @@ self.addEventListener('fetch', event => {
 // ── Push Notifications ────────────────────────────────────────────────────
 self.addEventListener('push', event => {
   let data = { title: 'W0PIUM', body: '', url: '/' };
-  try { data = { ...data, ...event.data?.json() }; } catch {}
+  try { data = { ...data, ...event.data?.json() }; } catch (e) { console.debug('Push data parse failed:', e.message); }
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
+      icon: '/icons/icon-192.svg',
+      badge: '/icons/icon-192.svg',
       tag: data.tag || 'w0pium',
       data: { url: data.url },
       vibrate: [100, 50, 100],

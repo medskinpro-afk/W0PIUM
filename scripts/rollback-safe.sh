@@ -20,7 +20,7 @@ echo "==> Restarting container"
 docker restart w0pium
 
 echo "==> Health check"
-curl -fsS --max-time 30 https://w0pium.walfir.com/api/health
+curl -fsS --max-time 30 "$W0PIUM_HEALTH_URL"
 echo
 
 echo "==> Recent logs"
