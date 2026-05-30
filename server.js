@@ -147,7 +147,7 @@ async function isSsrfBlocked(rawUrl) {
 
 let db;
 function save() { /* better-sqlite3 writes directly to disk — no-op kept for SIGINT/SIGTERM compat */ }
-function run(s, params = []) { db.prepare(s).run(params); }
+function run(s, params = []) { return db.prepare(s).run(params); }
 function get(s, params = []) { return db.prepare(s).get(params) ?? null; }
 function all(s, params = []) { return db.prepare(s).all(params); }
 
@@ -552,8 +552,9 @@ function main() {
     if (!t) return res.status(401).json({ error:'unauthenticated' });
     const s = get('SELECT user_id FROM sessions WHERE token=?', [t]);
     if (!s) return res.status(401).json({ error:'unauthenticated' });
-    const u = get('SELECT is_admin FROM users WHERE id=?', [s.user_id]);
+    const u = get('SELECT is_admin, banned_at FROM users WHERE id=?', [s.user_id]);
     if (!u || !u.is_admin) return res.status(403).json({ error:'forbidden' });
+    if (u.banned_at) return res.status(403).json({ error:'banned' });
     req.uid = s.user_id; next();
   }
   function oAuth(req, res, next) {
@@ -887,7 +888,7 @@ function main() {
 
   app.post('/api/reset-password', limiterForgot, async (req, res) => {
     const { email, token, password } = req.body;
-    if (!email || !token || !password || password.length < 6) return res.status(400).json({ error:'Заполни все поля' });
+    if (!email || !token || !password || password.length < 8) return res.status(400).json({ error:'Заполни все поля' });
     const u = get('SELECT id,reset_token,reset_token_exp FROM users WHERE email_hash=?', [hashEmail(email)]);
     if (!u || u.reset_token !== token) return res.status(400).json({ error:'Неверный код' });
     if (!u.reset_token_exp || new Date(u.reset_token_exp) < new Date()) return res.status(400).json({ error:'Код устарел' });
@@ -1588,11 +1589,14 @@ function main() {
       run('INSERT INTO post_reactions (post_id,user_id,emoji) VALUES(?,?,?)', [req.params.id, req.uid, emoji]);
     }
     const reactions = all('SELECT emoji, COUNT(*) AS count FROM post_reactions WHERE post_id=? GROUP BY emoji', [req.params.id]);
+    const myReacts = new Set(all('SELECT emoji FROM post_reactions WHERE post_id=? AND user_id=?', [req.params.id, req.uid]).map(r => r.emoji));
+    reactions.forEach(r => { r.me = myReacts.has(r.emoji); });
     res.json({ ok: 1, reactions });
   });
   app.delete('/api/posts/:id/react', auth, (req, res) => {
     run('DELETE FROM post_reactions WHERE post_id=? AND user_id=?', [req.params.id, req.uid]);
     const reactions = all('SELECT emoji, COUNT(*) AS count FROM post_reactions WHERE post_id=? GROUP BY emoji', [req.params.id]);
+    reactions.forEach(r => { r.me = false; });
     res.json({ ok: 1, reactions });
   });
 
@@ -1613,6 +1617,14 @@ function main() {
     res.json(enrich(raw, req.uid));
   });
 
+  // SINGLE POST (used by admin to inspect reported posts)
+  app.get('/api/posts/:id', adminAuth, (req, res) => {
+    const rows = all(`SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type
+      FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error:'not found' });
+    res.json(enrich(rows, req.uid)[0]);
+  });
+
   // LIKERS
   app.get('/api/posts/:id/likes', auth, (req, res) => {
     res.json(all('SELECT u.username,u.display_name,u.avatar FROM likes l JOIN users u ON u.id=l.user_id WHERE l.post_id=? LIMIT 50', [req.params.id]));
@@ -1629,7 +1641,7 @@ function main() {
     const content = (req.body.content || '').replace(/<[^>]*>/g, '').trim();
     if (!content) return res.status(400).json({ error: 'Пустой текст' });
     if (content.length > 2000) return res.status(400).json({ error: 'Макс. 2000 символов' });
-    run('UPDATE posts SET content=? WHERE id=?', [content, po.id]);
+    run('UPDATE posts SET content=?, edited_at=datetime(\'now\') WHERE id=?', [content, po.id]);
     res.json({ ok: 1, content });
   });
 
@@ -1637,7 +1649,8 @@ function main() {
     const post = get('SELECT id,user_id,created_at FROM posts WHERE id=?', [req.params.id]);
     if (!post) return res.status(404).json({error:'not found'});
     if (post.user_id !== req.uid) return res.status(403).json({error:'forbidden'});
-    const ageMs = Date.now() - new Date(post.created_at).getTime();
+    const _ts = post.created_at.includes('T') ? post.created_at : post.created_at.replace(' ', 'T');
+    const ageMs = Date.now() - new Date(_ts.includes('Z') ? _ts : _ts + 'Z').getTime();
     if (ageMs > 24 * 3600 * 1000) return res.status(400).json({error:'Редактировать можно только в течение 24 часов'});
     const content = (req.body.content || '').trim();
     if (!content) return res.status(400).json({error:'empty'});
@@ -1914,7 +1927,7 @@ function main() {
     }
     if (!content&&!image&&!track_url) return res.status(400).json({ error:'Пустой drop' });
     const id=uuidv4();
-    run('INSERT INTO drops (id,user_id,content,track_url,image) VALUES(?,?,?,?,?)',[id,req.uid,content,track_url,image]);
+    run('INSERT INTO drops (id,user_id,content,track_url,image,expires_at) VALUES(?,?,?,?,?,datetime(\'now\',\'+24 hours\'))',[id,req.uid,content,track_url,image]);
     res.json({ ok:1, id });
   });
   app.delete('/api/drops/:id', auth, (req, res) => {
@@ -2236,7 +2249,7 @@ function main() {
     run('INSERT INTO messages (id,conv_id,sender_id,content,file,file_type,file_size,file_name,reply_to,reply_text) VALUES(?,?,?,?,?,?,?,?,?,?)',[id,cid,req.uid,text||'',file,fileType,fileSize,fileName,reply_to,reply_text]);
     run('UPDATE conversation_members SET last_read=datetime(\'now\') WHERE conv_id=? AND user_id=?',[cid,req.uid]);
     const members=all('SELECT user_id FROM conversation_members WHERE conv_id=?',[cid]);
-    const payload={ id,conv_id:cid,sender_id:req.uid,content:text||'',file,file_type:fileType,file_size:fileSize,reply_to,reply_text,created_at:new Date().toISOString(),reactions:[] };
+    const payload={ id,conv_id:cid,sender_id:req.uid,content:text||'',file,file_type:fileType,file_size:fileSize,file_name:fileName,reply_to,reply_text,created_at:new Date().toISOString(),reactions:[] };
     members.forEach(row=>{ if (row.user_id!==req.uid) { notify(row.user_id,req.uid,'dm',cid); pushEvent(row.user_id,'message',payload); const memRow=get('SELECT muted_until FROM conversation_members WHERE conv_id=? AND user_id=?',[cid,row.user_id]); const isMuted=memRow?.muted_until&&new Date(memRow.muted_until)>new Date(); if (!isMuted) sendPush(row.user_id, `Новое сообщение`, payload.content ? payload.content.slice(0,80) : '📎 файл', '/'); } });
     // Detect @mentions and notify mentioned users
     const mentionMatches=(text||'').match(/@([a-z0-9_]+)/gi)||[];
@@ -2337,7 +2350,7 @@ function main() {
   });
 
   // MESSAGE REACTIONS
-  const ALLOWED_EMOJI=['🔥','💀','🎵','👀','✅','😭'];
+  const ALLOWED_EMOJI=['🔥','💀','🎵','👀','✅','😭','❤️','💯'];
   app.post('/api/chats/:cid/messages/:mid/react', auth, limiterReact, (req, res) => {
     const { cid,mid }=req.params, { emoji }=req.body;
     if (!emoji||!ALLOWED_EMOJI.includes(emoji)) return res.status(400).json({ error:'invalid emoji' });
@@ -3136,7 +3149,23 @@ function main() {
     }));
   });
 
-  app.use('/disk', auth, express.static(DISK_DIR));
+  app.get('/disk/*', auth, (req, res) => {
+    const relPath = req.params[0];
+    if (!relPath) return res.status(400).send('Bad Request');
+    const absPath = p.resolve(p.join(DISK_DIR, relPath));
+    if (!_pathUnderDir(absPath, DISK_DIR)) return res.status(403).send('Forbidden');
+    const filePath = '/disk/' + relPath;
+    const f = relPath.startsWith('previews/')
+      ? get('SELECT user_id FROM disk_files WHERE preview_path=?', [filePath])
+      : get('SELECT user_id FROM disk_files WHERE path=?', [filePath]);
+    if (!f) return res.status(404).send('Not found');
+    if (f.user_id !== req.uid) {
+      const admin = get('SELECT is_admin FROM users WHERE id=?', [req.uid]);
+      if (!admin || !admin.is_admin) return res.status(403).send('Forbidden');
+    }
+    if (!fs.existsSync(absPath)) return res.status(404).send('Not found');
+    res.sendFile(absPath);
+  });
 
   app.get('/api/health', (req, res) => {
     let db = 'unknown';

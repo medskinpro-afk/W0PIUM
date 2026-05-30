@@ -332,7 +332,7 @@ let _repostMenuEl = null;
 let _reportMenuEl = null;
 
 // Reaction picker state
-const ALLOWED_EMOJI = ['🖤','💀','🥀','👁️','🌹','🔮'];
+const ALLOWED_EMOJI = ['🔥','💀','🎵','👀','✅','😭','❤️','💯'];
 let _pickerEl = null;
 let _pickerMid = null;
 
@@ -956,7 +956,7 @@ function initUiDelegates() {
   if (window.__uiDelegatesBound) return;
   window.__uiDelegatesBound = true;
 
-  document.addEventListener('click', ev => {
+  document.addEventListener('click', async ev => {
     if (
       document.body.classList.contains('menu-open') &&
       !ev.target.closest('#mobileMenu') &&
@@ -1021,7 +1021,33 @@ function initUiDelegates() {
         return jumpToMessage(postActionEl.dataset.msgId || '', postActionEl.dataset.convId || '');
       case 'go-chat': return go('chat', postActionEl.dataset.convId || '');
       case 'go-chats': return go('chats');
+      case 'go-post': {
+        if (!postId) return;
+        try {
+          const _post = await api('/posts/' + postId);
+          const _m = document.createElement('div');
+          _m.className = 'modal-overlay';
+          _m.innerHTML = `<div class="modal" style="max-width:640px;padding:0;overflow:auto;max-height:90vh">${postHtml(_post)}</div>`;
+          _m.addEventListener('click', e => { if (e.target === _m) _m.remove(); });
+          document.body.appendChild(_m);
+        } catch { toast.error('Пост не найден'); }
+        return;
+      }
       case 'go-disk': return go('disk');
+      case 'go-disk-file': {
+        const _fid = postActionEl.dataset.fileId;
+        await go('disk');
+        if (_fid) {
+          let _attempts = 0;
+          const _scroll = () => {
+            const _el = document.getElementById('dfile-' + _fid);
+            if (_el) { _el.scrollIntoView({ behavior: 'smooth', block: 'center' }); _el.click(); }
+            else if (_attempts++ < 15) setTimeout(_scroll, 200);
+          };
+          setTimeout(_scroll, 300);
+        }
+        return;
+      }
       case 'go-discover': return go('discover');
       case 'go-feed': return go('feed');
       case 'go': return go(postActionEl.dataset.navTarget || 'feed');
@@ -3015,7 +3041,7 @@ async function renderSearch(app, initQuery) {
         }).join('') : '<div class="empty">Сообщений не найдено</div>';
       } else if (tab === 'files') {
         html = r.files?.length ? r.files.map(f => `
-          <div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-disk">
+          <div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-disk-file" data-file-id="${esc(f.id)}">
             <div class="artist-info">
               <div class="artist-name">${esc(f.name)}</div>
               <div class="artist-bio">${fmtBytes(f.size || 0)} · ${esc((f.description || '').slice(0,80)) || 'Файл на диске'}</div>
@@ -3026,7 +3052,7 @@ async function renderSearch(app, initQuery) {
         const blocks = [];
         if (r.users?.length) blocks.push(`<div class="search-section"><div class="search-section-title">ЛЮДИ</div>${r.users.map(u => `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-profile" data-username="${esc(u.username)}">${avatarEl(u.avatar,'avatar-sm',initial(u.display_name))}<div class="artist-info"><div class="artist-name">${esc(u.display_name)}</div><div class="artist-handle">@${esc(u.username)}</div></div></div>`).join('')}</div>`);
         if (r.messages?.length) blocks.push(`<div class="search-section"><div class="search-section-title">СООБЩЕНИЯ</div>${r.messages.map(m => `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="jump-to-message" data-msg-id="${esc(m.id)}" data-conv-id="${esc(m.conv_id)}"><div class="artist-info"><div class="artist-name">${esc(m.display_name)}</div><div class="artist-bio">${esc((m.content||'').slice(0,80))}</div></div></div>`).join('')}</div>`);
-        if (r.files?.length) blocks.push(`<div class="search-section"><div class="search-section-title">ФАЙЛЫ</div>${r.files.map(f => `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-disk"><div class="artist-info"><div class="artist-name">${esc(f.name)}</div><div class="artist-bio">${fmtBytes(f.size || 0)}</div></div></div>`).join('')}</div>`);
+        if (r.files?.length) blocks.push(`<div class="search-section"><div class="search-section-title">ФАЙЛЫ</div>${r.files.map(f => `<div class="artist-row search-kb-item" role="button" tabindex="0" data-post-action="go-disk-file" data-file-id="${esc(f.id)}"><div class="artist-info"><div class="artist-name">${esc(f.name)}</div><div class="artist-bio">${fmtBytes(f.size || 0)}</div></div></div>`).join('')}</div>`);
         if (r.posts?.length) blocks.push(`<div class="search-section"><div class="search-section-title">ПОСТЫ</div>${r.posts.map(postHtml).join('')}</div>`);
         html = blocks.join('') || '<div class="empty">Ничего не найдено</div>';
       }
@@ -5505,7 +5531,7 @@ async function loadAdminTab() {
             <span class="admin-row-meta">от @${esc(r.reporter_username)} · ${esc(r.reason)} · ${timeAgo(r.created_at)}</span>
           </div>
           <div class="admin-actions">
-            ${r.target_type==='post'?`<button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-feed">${iconCut('forward', 'ui-icon', 13, 13)}ПЕРЕЙТИ</button>`:''}
+            ${r.target_type==='post'?`<button class="btn btn-sm btn-ghost btn-ic-row" data-post-action="go-post" data-post-id="${esc(r.target_id)}">${iconCut('forward', 'ui-icon', 13, 13)}ПЕРЕЙТИ</button>`:''}
             <button class="btn btn-sm btn-ic-row" data-post-action="admin-resolve-report" data-report-id="${esc(r.id)}">${iconCut('check', 'ui-icon', 13, 13)}ЗАКРЫТЬ</button>
           </div>
         </div>
@@ -7927,7 +7953,7 @@ async function saveGroupInfo(cid, modal) {
     try {
       const r = await fetch('/api/chats/' + cid + '/avatar', {
         method: 'POST',
-        headers: { 'x-csrf-token': me?.csrf_token || '' },
+        headers: { 'X-CSRF-Token': me?.csrf_token || csrfToken || '' },
         credentials: 'include',
         body: fd
       });
