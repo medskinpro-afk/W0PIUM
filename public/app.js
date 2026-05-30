@@ -797,6 +797,10 @@ function showPwaHint() {
 
 // ── INIT ──
 async function init() {
+  // Suppress console.debug in non-dev environments
+  if (!location.hostname.startsWith('localhost') && !location.hostname.startsWith('127.0.0.1') && !location.hostname.startsWith('[::1]')) {
+    console.debug = () => {};
+  }
   document.querySelectorAll('.msg-menu-overlay').forEach(el => el.remove());
   closeMsgMenuPopover();
   initUiDelegates();
@@ -1290,6 +1294,8 @@ function initUiDelegates() {
           postActionEl.dataset.optId || '',
           postActionEl,
         );
+      case 'retry':
+        return go(page, pageParam, 'none');
     }
   });
 
@@ -1458,7 +1464,16 @@ function go(p, param, _hist = 'push') {
     admin:     () => renderAdmin(app),
     bookmarks: () => renderBookmarks(app),
   };
-  (routes[p] || routes.discover)();
+  try {
+    await (routes[p] || routes.discover)();
+  } catch (e) {
+    console.error('Page render failed:', p, e);
+    app.innerHTML = `<div class="empty empty-big" style="padding:4rem 1rem;text-align:center">
+      <div style="font-size:2rem;margin-bottom:1rem;opacity:0.3">✕</div>
+      <div style="opacity:0.5;font-size:0.9rem">Не удалось загрузить страницу</div>
+      <button class="btn btn-sm" style="margin-top:1rem" data-post-action="retry">Повторить</button>
+    </div>`;
+  }
 }
 
 // ── HELPERS ──

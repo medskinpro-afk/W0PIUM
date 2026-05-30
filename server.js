@@ -18,6 +18,8 @@ const webpush = require('web-push');
 const archiver = require('archiver');
 const sharp = require('sharp');
 
+const APP_VERSION = require('./package.json').version;
+
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const IS_PROD = process.env.NODE_ENV === 'production';
 const RECENT_ERRORS = [];
@@ -444,8 +446,6 @@ function main() {
     'CREATE INDEX IF NOT EXISTS idx_mutes_muter ON mutes(muter_id)',
     'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
   ].forEach(s => { try { db.exec(s); } catch(e) { logger.warn('index: ' + e.message); } });
-
-  const APP_VERSION = require('./package.json').version;
 
   const app = express();
   app.set('trust proxy', 1);
@@ -3226,14 +3226,16 @@ function main() {
   setInterval(() => { backgroundWorkerTick().catch(e => logger.error(e, 'backgroundWorkerTick')); }, 2_500);
 
   setInterval(() => {
-    // Find newly-due scheduled posts and clear their scheduled_at
-    const due = all(`SELECT p.id, p.user_id FROM posts p WHERE p.scheduled_at IS NOT NULL AND datetime(p.scheduled_at) <= datetime('now') AND p.archived=0`);
-    if (due.length) {
-      run(`UPDATE posts SET scheduled_at=NULL WHERE scheduled_at IS NOT NULL AND datetime(scheduled_at) <= datetime('now')`);
-      // Notify post owners via SSE so their UI refreshes
+    try {
+      const due = all(`SELECT p.id, p.user_id FROM posts p WHERE p.scheduled_at IS NOT NULL AND datetime(p.scheduled_at) <= datetime('now') AND p.archived=0 LIMIT 500`);
+      if (!due.length) return;
+      run(`UPDATE posts SET scheduled_at=NULL WHERE id IN (${due.map(() => '?').join(',')})`, due.map(p => p.id));
       const userIds = [...new Set(due.map(p => p.user_id))];
       userIds.forEach(uid => pushEvent(uid, 'post_published', { count: due.filter(p => p.user_id === uid).length }));
+      if (due.length >= 500) logger.warn({ count: due.length }, 'scheduled post batch hit 500 limit — may have overflow');
+    } catch (e) {
+      logger.error(e, 'scheduled post publisher error');
     }
-  }, 60_000);
+  }, 30_000);
 }
 main();
