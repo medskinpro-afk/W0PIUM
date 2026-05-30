@@ -5,10 +5,12 @@ RUN apk add --no-cache python3 make g++
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts && npm rebuild better-sqlite3 sharp
+RUN npm ci --omit=dev
 
 COPY server.js .
+COPY scripts/ scripts/
 COPY public/ public/
+COPY icons_cut/ icons_cut/
 
 ENV DATA_DIR=/data
 ENV PORT=3000

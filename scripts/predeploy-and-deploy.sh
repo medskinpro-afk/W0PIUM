@@ -37,6 +37,6 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 
 echo "==> Verifying health endpoint"
-HEALTH="$(curl -fsS --max-time 30 https://w0pium.walfir.com/api/health)"
+HEALTH="$(curl -fsS --max-time 30 "$W0PIUM_HEALTH_URL")"
 echo "$HEALTH"
 echo "==> Done"
