@@ -17,3 +17,8 @@ for _nd in \
   fi
 done
 export PATH
+
+# Override to target another environment from DSM tasks/scripts.
+# Example: export W0PIUM_HEALTH_URL="https://staging.example.com/api/health"
+: "${W0PIUM_HEALTH_URL:=http://localhost:3000/api/health}"
+export W0PIUM_HEALTH_URL
