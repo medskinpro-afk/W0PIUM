@@ -453,6 +453,7 @@ function main() {
         connectSrc: ["'self'"],
         frameSrc:   ["https://w.soundcloud.com"],
         workerSrc:  ["'self'", "blob:"],
+        upgradeInsecureRequests: null, // disabled — server is HTTP-only (behind reverse proxy)
       }
     },
     crossOriginEmbedderPolicy: false,
