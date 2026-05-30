@@ -102,6 +102,9 @@ const limiterSessionManage = _rl({ windowMs: 60_000, limit: 30, keyGenerator: re
 const limiterAccountDelete = _rl({ windowMs: 3_600_000, limit: 2, keyGenerator: req => req.uid || req.ip, message: 'Подожди немного перед повтором' });
 const limiterAvatarUpload = _rl({ windowMs: 60_000, limit: 10, keyGenerator: req => req.uid || req.ip, message: 'Слишком много загрузок аватара' });
 const limiterAdminJobTest = _rl({ windowMs: 60_000, limit: 30, keyGenerator: req => req.uid || req.ip });
+const limiterFollow    = _rl({ windowMs: 60_000, limit: 30, keyGenerator: req => req.uid || req.ip, message: 'Слишком много подписок' });
+const limiterBlockMute = _rl({ windowMs: 60_000, limit: 20, keyGenerator: req => req.uid || req.ip, message: 'Слишком много действий' });
+const limiterLike      = _rl({ windowMs: 60_000, limit: 60, keyGenerator: req => req.uid || req.ip, message: 'Слишком много оценок' });
 
 const PORT = process.env.PORT || 3000;
 const DATA = process.env.DATA_DIR || './data';
@@ -115,7 +118,11 @@ const DB_PATH  = p.join(DATA, 'w0pium.db');
 [AVA_DIR, IMG_DIR, MSG_DIR, FILE_DIR, DISK_DIR, DISK_PREV_DIR].forEach(d => fs.mkdirSync(d, { recursive: true }));
 
 const INVITE_ONLY = process.env.INVITE_ONLY === '1';
-const MASTER_CODE = (process.env.MASTER_CODE || 'W0PIUM').toUpperCase();
+let MASTER_CODE = (process.env.MASTER_CODE || '').toUpperCase();
+if (!MASTER_CODE) {
+  MASTER_CODE = crypto.randomUUID().slice(0, 8).toUpperCase();
+  logger.info({ master_code: MASTER_CODE }, 'DEV: MASTER_CODE not set — generated random one-time code');
+}
 const RESEND_KEY  = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM  = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 const VAPID_PUBLIC  = process.env.VAPID_PUBLIC  || '';
@@ -437,6 +444,8 @@ function main() {
     'CREATE INDEX IF NOT EXISTS idx_mutes_muter ON mutes(muter_id)',
     'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
   ].forEach(s => { try { db.exec(s); } catch(e) { logger.warn('index: ' + e.message); } });
+
+  const APP_VERSION = require('./package.json').version;
 
   const app = express();
   app.set('trust proxy', 1);
@@ -1015,7 +1024,7 @@ function main() {
   });
 
   // FOLLOW
-  app.post('/api/follow/:id', auth, (req, res) => {
+  app.post('/api/follow/:id', auth, limiterFollow, (req, res) => {
     if (req.params.id === req.uid) return res.status(400).json({ error:'no' });
     const target = get('SELECT id,is_private FROM users WHERE id=?', [req.params.id]);
     if (!target) return res.status(404).json({ error:'not found' });
@@ -1038,7 +1047,7 @@ function main() {
     } catch (e) { logger.debug({ error: e.message }, 'follow notification failed'); }
     res.json({ ok:1 });
   });
-  app.delete('/api/follow/:id', auth, (req, res) => {
+  app.delete('/api/follow/:id', auth, limiterFollow, (req, res) => {
     run('DELETE FROM follows WHERE follower_id=? AND following_id=?', [req.uid, req.params.id]);
     run('DELETE FROM follow_requests WHERE from_id=? AND to_id=?', [req.uid, req.params.id]);
     res.json({ ok:1 });
@@ -1051,7 +1060,7 @@ function main() {
       WHERE fr.to_id=? ORDER BY fr.created_at DESC`, [req.uid]);
     res.json(requests);
   });
-  app.post('/api/follow-requests/:id/accept', auth, (req, res) => {
+  app.post('/api/follow-requests/:id/accept', auth, limiterFollow, (req, res) => {
     const row = get('SELECT from_id FROM follow_requests WHERE id=? AND to_id=?', [req.params.id, req.uid]);
     if (!row) return res.status(404).json({ error:'not found' });
     try { run('INSERT INTO follows (follower_id,following_id) VALUES(?,?)', [row.from_id, req.uid]); } catch (e) { logger.debug({ from_id: row.from_id, to_id: req.uid, error: e.message }, 'follow request accept insert failed'); }
@@ -1061,7 +1070,7 @@ function main() {
     pushEvent(row.from_id, 'notif', { type:'follow_accepted', ref:'' });
     res.json({ ok:1 });
   });
-  app.delete('/api/follow-requests/:id', auth, (req, res) => {
+  app.delete('/api/follow-requests/:id', auth, limiterFollow, (req, res) => {
     const row = get('SELECT from_id FROM follow_requests WHERE id=? AND to_id=?', [req.params.id, req.uid]);
     run('DELETE FROM follow_requests WHERE id=? AND to_id=?', [req.params.id, req.uid]);
     if (row) run('DELETE FROM notifications WHERE user_id=? AND from_id=? AND type=?', [req.uid, row.from_id, 'follow_request']);
@@ -1563,7 +1572,7 @@ function main() {
   });
 
   // LIKES
-  app.post('/api/posts/:id/like', auth, (req, res) => {
+  app.post('/api/posts/:id/like', auth, limiterLike, (req, res) => {
     try {
       run('INSERT INTO likes (user_id,post_id) VALUES(?,?)',[req.uid,req.params.id]);
       const po=get('SELECT user_id FROM posts WHERE id=?',[req.params.id]);
@@ -1571,7 +1580,7 @@ function main() {
     } catch (e) { logger.debug({ post_id: req.params.id, error: e.message }, 'like notification failed'); }
     res.json({ likes:get('SELECT COUNT(*) AS c FROM likes WHERE post_id=?',[req.params.id]).c });
   });
-  app.delete('/api/posts/:id/like', auth, (req, res) => {
+  app.delete('/api/posts/:id/like', auth, limiterLike, (req, res) => {
     run('DELETE FROM likes WHERE user_id=? AND post_id=?',[req.uid,req.params.id]);
     res.json({ likes:get('SELECT COUNT(*) AS c FROM likes WHERE post_id=?',[req.params.id]).c });
   });
@@ -1717,14 +1726,14 @@ function main() {
     });
     res.json({ ok:1, id });
   });
-  app.post('/api/comments/:id/like', auth, (req, res) => {
+  app.post('/api/comments/:id/like', auth, limiterLike, (req, res) => {
     const c = get('SELECT c.id,c.user_id,c.post_id FROM comments c WHERE c.id=?', [req.params.id]);
     if (!c) return res.status(404).json({ error:'not found' });
     try { run('INSERT INTO comment_likes (comment_id,user_id) VALUES(?,?)',[req.params.id,req.uid]); } catch {}
     if (c.user_id !== req.uid) { notify(c.user_id, req.uid, 'comment_like', c.post_id); pushEvent(c.user_id, 'notif', { type:'comment_like', ref:c.post_id }); }
     res.json({ likes:get('SELECT COUNT(*) AS c FROM comment_likes WHERE comment_id=?',[req.params.id]).c });
   });
-  app.delete('/api/comments/:id/like', auth, (req, res) => {
+  app.delete('/api/comments/:id/like', auth, limiterLike, (req, res) => {
     run('DELETE FROM comment_likes WHERE comment_id=? AND user_id=?',[req.params.id,req.uid]);
     res.json({ likes:get('SELECT COUNT(*) AS c FROM comment_likes WHERE comment_id=?',[req.params.id]).c });
   });
@@ -2399,7 +2408,7 @@ function main() {
     res.json({ ok:1, saved:false });
   });
 
-  app.post('/api/user/:u/block', auth, (req,res) => {
+  app.post('/api/user/:u/block', auth, limiterBlockMute, (req,res) => {
     const target = get('SELECT id FROM users WHERE username=?', [req.params.u]);
     if (!target) return res.status(404).json({error:'not found'});
     if (target.id === req.uid) return res.status(400).json({error:'cannot block yourself'});
@@ -2408,7 +2417,7 @@ function main() {
     run('DELETE FROM follows WHERE (follower_id=? AND following_id=?) OR (follower_id=? AND following_id=?)', [req.uid,target.id,target.id,req.uid]);
     res.json({ok:1});
   });
-  app.delete('/api/user/:u/block', auth, (req,res) => {
+  app.delete('/api/user/:u/block', auth, limiterBlockMute, (req,res) => {
     const target = get('SELECT id FROM users WHERE username=?', [req.params.u]);
     if (!target) return res.status(404).json({error:'not found'});
     run('DELETE FROM blocks WHERE blocker_id=? AND blocked_id=?', [req.uid, target.id]);
@@ -2416,14 +2425,14 @@ function main() {
   });
 
   // ── MUTES ──
-  app.post('/api/user/:u/mute', auth, (req,res) => {
+  app.post('/api/user/:u/mute', auth, limiterBlockMute, (req,res) => {
     const target = get('SELECT id FROM users WHERE username=?', [req.params.u]);
     if (!target) return res.status(404).json({error:'not found'});
     if (target.id === req.uid) return res.status(400).json({error:'cannot mute yourself'});
     run('INSERT OR IGNORE INTO mutes (muter_id,muted_id) VALUES(?,?)', [req.uid, target.id]);
     res.json({ok:1});
   });
-  app.delete('/api/user/:u/mute', auth, (req,res) => {
+  app.delete('/api/user/:u/mute', auth, limiterBlockMute, (req,res) => {
     const target = get('SELECT id FROM users WHERE username=?', [req.params.u]);
     if (!target) return res.status(404).json({error:'not found'});
     run('DELETE FROM mutes WHERE muter_id=? AND muted_id=?', [req.uid, target.id]);
@@ -3185,8 +3194,8 @@ function main() {
     res.json({
       ok: true,
       uptime: process.uptime(),
-      build: 'ui-polish-3.0',
-      app_version: '0.9.27',
+      build: process.env.BUILD_ID || 'dev',
+      app_version: APP_VERSION,
       db,
       social_schema,
     });

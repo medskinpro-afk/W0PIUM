@@ -1,5 +1,5 @@
 // ── VERSION ──
-const APP_VERSION = '0.9.19';
+const APP_VERSION = '0.9.27';
 
 // ── IMAGE LIGHTBOX ──
 function openImg(src) {

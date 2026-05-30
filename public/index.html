@@ -9,26 +9,26 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="W0PIUM">
   <title>W0PIUM</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?v=0.9.27">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
 </head>
 <body>
   <canvas id="bg"></canvas>
   <nav>
-    <div class="nav-logo" onclick="go('feed')">W<span class="logo-zero">Ø</span>PIUM</div>
+    <div class="nav-logo" data-ui-action="go-feed">W<span class="logo-zero">Ø</span>PIUM</div>
     <div class="nav-links" id="navLinks"></div>
-    <div class="nav-burger" id="burger" onclick="toggleMenu()">
+    <div class="nav-burger" id="burger" data-ui-action="toggle-menu">
       <span></span><span></span>
     </div>
   </nav>
   <div class="mobile-menu hidden" id="mobileMenu"></div>
   <main id="app"></main>
   <div id="appVersion"></div>
-  <script src="/utils/cn.js"></script>
-  <script src="/utils/toast.js"></script>
-  <script src="/app.js"></script>
-  <script src="/pages/chat.js"></script>
-  <script src="/pages/drops.js"></script>
+  <script src="/utils/cn.js?v=0.9.27"></script>
+  <script src="/utils/toast.js?v=0.9.27"></script>
+  <script src="/app.js?v=0.9.27"></script>
+  <script src="/pages/chat.js?v=0.9.27"></script>
+  <script src="/pages/drops.js?v=0.9.27"></script>
 </body>
 </html>
