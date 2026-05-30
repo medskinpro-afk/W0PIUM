@@ -81,7 +81,8 @@ const _rl = opts =>
 const limiterRegister = _rl({ windowMs: 60_000, limit: 5,  message: 'Слишком много регистраций. Попробуй позже' });
 const limiterLogin    = _rl({ windowMs: 60_000, limit: 10, message: 'Слишком много попыток. Попробуй позже' });
 const limiterResend   = _rl({ windowMs: 300_000, limit: 3, message: 'Подожди немного' });
-const limiterForgot = _rl({ windowMs: 300_000, limit: 3, message: 'Подожди немного' });
+const limiterForgot      = _rl({ windowMs: 300_000, limit: 3,  message: 'Подожди немного' });
+const limiterResetPwd    = _rl({ windowMs: 300_000, limit: 10, message: 'Подожди немного' });
 const limiterPosts    = _rl({ windowMs: 60_000, limit: 10, keyGenerator: req => req.uid || req.ip, message: 'Слишком много постов. Попробуй позже' });
 const limiterDrops    = _rl({ windowMs: 60_000, limit: 5,  keyGenerator: req => req.uid || req.ip, message: 'Слишком много дропов' });
 const limiterMsg      = _rl({ windowMs: 60_000, limit: 20, keyGenerator: req => req.uid || req.ip, message: 'Слишком много сообщений. Попробуй позже' });
@@ -824,6 +825,7 @@ function main() {
     // accept email OR username (case-insensitive)
     const u = get("SELECT * FROM users WHERE LOWER(username)=LOWER(?) OR (email_hash!='' AND email_hash=?)", [username, hashEmail(username)]);
     if (!u||!bcrypt.compareSync(password,u.password)) return res.status(401).json({ error:'Неверные данные' });
+    if (!u.email_verified) return res.status(403).json({ error:'Email не подтверждён', pending:true });
     const token = uuidv4();
     run('INSERT INTO sessions (token,user_id,ip,user_agent) VALUES(?,?,?,?)', [token, u.id, req.ip||'', (req.headers['user-agent']||'').slice(0,200)]);
     res.cookie('token', token, { httpOnly:true, maxAge:30*24*3600000, sameSite:'lax', secure:process.env.NODE_ENV==='production' });
@@ -846,10 +848,10 @@ function main() {
     if (!u) return res.status(404).json({ error:'Пользователь не найден' });
     // Already verified — don't create a new session without password auth
     if (u.email_verified) return res.json({ ok:1, already_verified:true });
-    if (!u.email_token || u.email_token !== String(token).trim())
-      return res.status(400).json({ error:'Неверный код' });
     if (u.email_token_exp && new Date(u.email_token_exp) < new Date())
       return res.status(400).json({ error:'Код истёк. Запроси новый' });
+    if (!u.email_token || u.email_token !== String(token).trim())
+      return res.status(400).json({ error:'Неверный код' });
     run('UPDATE users SET email_verified=1, email_token=\'\', email_token_exp=NULL WHERE id=?', [u.id]);
     const t = uuidv4();
     run('INSERT INTO sessions (token,user_id,ip,user_agent) VALUES(?,?,?,?)', [t, u.id, req.ip||'', (req.headers['user-agent']||'').slice(0,200)]);
@@ -886,7 +888,7 @@ function main() {
     res.json({ ok:1 });
   });
 
-  app.post('/api/reset-password', limiterForgot, async (req, res) => {
+  app.post('/api/reset-password', limiterResetPwd, async (req, res) => {
     const { email, token, password } = req.body;
     if (!email || !token || !password || password.length < 8) return res.status(400).json({ error:'Заполни все поля' });
     const u = get('SELECT id,reset_token,reset_token_exp FROM users WHERE email_hash=?', [hashEmail(email)]);
@@ -944,7 +946,7 @@ function main() {
       [display_name||'',bio||'',link_sc,link_ig,link_tg,link_spotify,link_site,is_private?1:0,dm_requests?1:0,show_read_receipts?1:0,show_typing?1:0,req.uid]);
     res.json({ ok:1 });
   });
-  app.put('/api/password', auth, limiterPasswordChange, (req, res) => {
+  app.put('/api/password', auth, limiterPasswordChange, async (req, res) => {
     const { old_password,new_password } = req.body||{};
     if (!old_password||!new_password) return res.status(400).json({ error:'Заполни все поля' });
     if (new_password.length<8) return res.status(400).json({ error:'Пароль должен быть не менее 8 символов' });
@@ -953,7 +955,7 @@ function main() {
     if (!_hasLetter || !_hasDigit) return res.status(400).json({ error: 'Пароль должен содержать буквы и цифры' });
     const u = get('SELECT password FROM users WHERE id=?', [req.uid]);
     if (!u||!bcrypt.compareSync(old_password,u.password)) return res.status(400).json({ error:'Неверный текущий пароль' });
-    run('UPDATE users SET password=? WHERE id=?', [bcrypt.hashSync(new_password,10),req.uid]);
+    run('UPDATE users SET password=? WHERE id=?', [await bcrypt.hash(new_password,10),req.uid]);
     res.json({ ok:1 });
   });
   app.delete('/api/me', auth, limiterAccountDelete, (req, res) => {
@@ -1617,8 +1619,8 @@ function main() {
     res.json(enrich(raw, req.uid));
   });
 
-  // SINGLE POST (used by admin to inspect reported posts)
-  app.get('/api/posts/:id', adminAuth, (req, res) => {
+  // SINGLE POST (admin reports modal + any future per-post deep link)
+  app.get('/api/posts/:id', auth, (req, res) => {
     const rows = all(`SELECT p.*,u.username,u.display_name,u.avatar,u.is_verified,u.badge_type
       FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=?`, [req.params.id]);
     if (!rows.length) return res.status(404).json({ error:'not found' });
@@ -2622,15 +2624,15 @@ function main() {
     const keys = {};
     all('SELECT platform,api_key FROM hub_api_keys').forEach(r => { keys[r.platform] = r.api_key; });
     const result = {};
-    await Promise.all(platforms.map(async p => {
-      const cached = hubStatsCache[p];
+    await Promise.all(platforms.map(async platform => {
+      const cached = hubStatsCache[platform];
       if (!forceRefresh && cached && Date.now() - cached.ts < HUB_CACHE_TTL) {
-        result[p] = { data: cached.data, cached: true, updated_at: new Date(cached.ts).toISOString() };
+        result[platform] = { data: cached.data, cached: true, updated_at: new Date(cached.ts).toISOString() };
         return;
       }
-      const data = await fetchPlatformStats(p, keys[p] || '');
-      hubStatsCache[p] = { data, ts: Date.now() };
-      result[p] = { data, cached: false, updated_at: new Date(hubStatsCache[p].ts).toISOString() };
+      const data = await fetchPlatformStats(platform, keys[platform] || '');
+      hubStatsCache[platform] = { data, ts: Date.now() };
+      result[platform] = { data, cached: false, updated_at: new Date(hubStatsCache[platform].ts).toISOString() };
     }));
     res.json(result);
   });
@@ -3101,8 +3103,10 @@ function main() {
     if (!f) return res.status(404).send('Not found');
     const filePath = p.resolve(p.join(DATA, f.path.replace(/^\/disk\//, 'disk/')));
     if (!filePath.startsWith(p.resolve(DATA) + p.sep)) return res.status(403).send('Forbidden');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(f.name)}"`);
-    if (f.mime) res.setHeader('Content-Type', f.mime);
+    const isSvg = (f.mime || '').toLowerCase().includes('svg') || (f.name || '').toLowerCase().endsWith('.svg');
+    const disposition = isSvg ? 'attachment' : 'inline';
+    res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(f.name)}"`);
+    if (f.mime && !isSvg) res.setHeader('Content-Type', f.mime);
     res.sendFile(filePath, err => { if (err && !res.headersSent) res.status(404).send('Not found'); });
   });
 

@@ -854,7 +854,8 @@ async function init() {
     else if (_pp.startsWith('/hashtag/')) go('hashtag', decodeURIComponent(_pp.slice(9)), 'none');
     else {
       const _m2 = { '/disk':'disk','/drops':'drops','/discover':'discover','/artists':'artists',
-        '/settings':'settings','/notifs':'notifs','/chats':'chats','/admin':'admin','/hub':'hub' };
+        '/settings':'settings','/notifs':'notifs','/chats':'chats','/admin':'admin','/hub':'hub',
+        '/bookmarks':'bookmarks','/search':'search' };
       go(_m2[_pp] || 'feed', null, 'none');
     }
   });
@@ -2095,7 +2096,7 @@ function socialOverviewHtml(data) {
     return `<button class="trend-chip" data-post-action="go-hashtag" data-tag="${esc(tag)}">#${esc(tag)} <span>${t.count || 0}</span></button>`;
   }).join('');
   const hot = (data?.hot_posts || []).slice(0, 3).map(p => `
-    <div class="mini-post" data-post-action="expand-post" data-post-id="${esc(p.id)}">
+    <div class="mini-post" data-post-action="go-post" data-post-id="${esc(p.id)}">
       <div class="mini-post-top">
         ${avatarEl(p.avatar, 'avatar-xs', initial(p.display_name))}
         <span>${esc(p.display_name)}</span>
@@ -3665,7 +3666,7 @@ async function renderNotifs(app) {
       <button class="seg-btn" data-post-action="go-discover">${iconCut('search', 'ui-icon', 12, 12)}DISCOVER</button>
     </div>
     ${dedupedNotifs.map(n => `
-      <div class="notif-card" data-post-action="${n.type==='dm' && n.ref_id ? 'go-chat' : (n.ref_id && n.type !== 'follow' && n.type !== 'follow_request') ? 'expand-post' : 'go-profile'}" data-post-id="${esc(n.ref_id || '')}" data-conv-id="${esc(n.ref_id || '')}" data-username="${esc(n.username || '')}">
+      <div class="notif-card" data-post-action="${n.type==='dm' && n.ref_id ? 'go-chat' : (n.ref_id && n.type !== 'follow' && n.type !== 'follow_request') ? 'go-post' : 'go-profile'}" data-post-id="${esc(n.ref_id || '')}" data-conv-id="${esc(n.ref_id || '')}" data-username="${esc(n.username || '')}">
         ${avatarEl(n.avatar, 'avatar', initial(n.display_name))}
         <div class="notif-card-main">
           <div class="notif-card-title"><strong>${esc(n.display_name)}</strong> ${esc(typeMap[n.type] || n.type)}</div>
@@ -4234,6 +4235,9 @@ async function renderChat(app, cid) {
         document.getElementById('scrollDownBtn')?.classList.remove('hidden');
       }
       if (chatMsgsEl.scrollTop < 80 && window._chatVisibleFrom > 0) {
+        window._chatVisibleFrom = Math.max(0, (window._chatVisibleFrom || 0) - CHAT_VIRTUAL_CHUNK);
+        rerenderVirtualMessages(conv);
+        loadLinkPreviews(chatMsgsEl).catch(() => {});
         return;
       }
       if (chatMsgsEl.scrollTop < 80 && window._chatHasMore && !window._chatLoadingMore && currentChatId) {
@@ -4528,7 +4532,7 @@ function msgHtml(m, prev, next) {
   } else {
     parts.push(`<div class="msg-time" title="${esc(timeTitle)}">${timeLabel}</div>`);
   }
-  parts.push(`<div class="reaction-bar" data-mid="${m.id}">${reactionBarHtml(m.id, m.reactions || [])}</div>`);
+  parts.push(`<div class="reaction-bar" data-mid="${m.id}">${reactionBarHtml(m.id, m.reactions || [], currentChatId)}</div>`);
   const msgMenuText = (m.content || m.reply_text || m.file_name || '').slice(0, 500);
   const actions = `
     <div class="msg-actions">
@@ -7560,9 +7564,9 @@ async function renderDisk(app) {
 
 // ── REACTIONS ──
 
-function reactionBarHtml(mid, reactions) {
+function reactionBarHtml(mid, reactions, cid) {
   const pills = (reactions || []).map(r =>
-    `<span class="reaction-pill${r.me ? ' me' : ''}" data-mid="${esc(String(mid))}" data-emoji="${esc(r.emoji)}" role="button" tabindex="0" title="${r.count}">${r.emoji}<span class="pill-count">${r.count}</span></span>`
+    `<span class="reaction-pill${r.me ? ' me' : ''}" data-mid="${esc(String(mid))}" data-emoji="${esc(r.emoji)}" data-conv-id="${esc(String(cid || ''))}" role="button" tabindex="0" title="${r.count}">${r.emoji}<span class="pill-count">${r.count}</span></span>`
   ).join('');
   return `${pills}<button class="reaction-add-btn" data-mid="${esc(String(mid))}" aria-label="Добавить реакцию">${iconCut('add', 'ui-icon', 14, 14)}</button>`;
 }
@@ -7630,7 +7634,7 @@ async function sendReaction(cid, mid, emoji) {
     toast.error('Не удалось поставить реакцию');
     // Revert optimistic update by re-rendering without the change
     const bar = _findReactionBar(mid);
-    if (bar) bar.innerHTML = reactionBarHtml(mid, []);
+    if (bar) bar.innerHTML = reactionBarHtml(mid, [], bar.dataset.convId || currentChatId);
   }
 }
 
@@ -7685,7 +7689,7 @@ function applyReactions(mid, reactions) {
   const fixed = me
     ? reactions.map(r => ({ ...r, me: !!(r.users && r.users.includes(me.id)) }))
     : reactions;
-  bar.innerHTML = reactionBarHtml(mid, fixed);
+  bar.innerHTML = reactionBarHtml(mid, fixed, bar.dataset.convId || currentChatId);
 }
 
 // Delegate reaction interactions — pill click toggles, + opens picker
@@ -7694,7 +7698,7 @@ document.addEventListener('click', e => {
   if (addBtn) { e.stopPropagation(); openPicker(addBtn.dataset.mid, addBtn); return; }
   const pill = e.target.closest('.reaction-pill');
   if (pill && pill.dataset.mid && pill.dataset.emoji) {
-    sendReaction(currentChatId, pill.dataset.mid, pill.dataset.emoji);
+    sendReaction(pill.dataset.convId || currentChatId, pill.dataset.mid, pill.dataset.emoji);
   }
 });
 
