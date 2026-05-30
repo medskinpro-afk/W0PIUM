@@ -570,6 +570,44 @@ ChatGPT/агент-тестировщик промпт — **`beta-test-agent-pr
 
 ---
 
+## Деплой — что нужно знать агенту
+
+### Как работает деплой
+
+```
+Изменения кода → git commit → DSM Task Scheduler → docker compose up --build -d
+```
+
+- `public/` **не монтируется** с хоста — она копируется в образ через `COPY public/` в Dockerfile
+- Значит: любое изменение в `public/` требует **rebuild образа** (`docker compose up --build`)
+- `data/` монтируется как volume — данные пережевают rebuild
+- Быстрый путь только для `server.js`: `docker cp server.js w0pium:/app/server.js && docker restart w0pium`
+
+### Запуск деплоя без SSH
+
+Через DSM Task Scheduler API (работает через LAN):
+```bash
+# Получить SID (логин):
+SID=$(curl -sk "http://192.168.129.149:5000/webapi/auth.cgi?api=SYNO.API.Auth&version=1&method=login&account=Walerca449&passwd=Mictico449!&session=Console&format=sid" | python -c "import sys,json; print(json.load(sys.stdin)['data']['sid'])")
+
+# Запустить задачу "W0PIUM Auto Pipeline" (id=10):
+curl -sk "http://192.168.129.149:5000/webapi/entry.cgi?api=SYNO.Core.TaskScheduler&version=1&method=run&id=10&_sid=$SID"
+```
+
+Задача 10 делает `cd /volume1/docker/w0pium && sh scripts/auto-pipeline.sh` → rebuild + health check.
+
+### DSM Task IDs (важно не перепутать)
+
+| ID | Имя | Что делает |
+|---|---|---|
+| 3 | Restart | `docker restart w0pium` — без rebuild |
+| 5 | Backup DB | Бэкап базы данных |
+| 10 | W0PIUM Auto Pipeline | **Полный деплой** (auto-pipeline.sh) |
+| 8 | Build | Другой проект! НЕ w0pium |
+| 9 | MedSkin Rebuild | Другой проект! НЕ w0pium |
+
+---
+
 ## Git workflow (обязательно)
 
 1. `git status` перед любыми изменениями
