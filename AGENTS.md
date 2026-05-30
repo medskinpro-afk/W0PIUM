@@ -28,6 +28,12 @@
 - **`public/pages/drops.js`** — логика дропов (IntersectionObserver, просмотры). Загружается отдельно.
 - Нет микросервисов, нет слоёв, нет ORM.
 
+### Фоновые задачи (без Redis)
+
+- Таблица **`background_jobs`**, воркер — `setInterval` (~2.5s) в `server.js`, один job за тик.
+- Типы: `noop` (тест), `image_webp` (payload: путь под `DATA`, `destKey`), `disk_image_preview` (превью для картинок на диске).
+- Админ: `GET /api/admin/jobs`, `POST /api/admin/jobs/test`, счётчики в `GET /api/admin/diagnostics`.
+
 ### База данных
 
 - **better-sqlite3** (синхронный SQLite). Все запросы синхронные — `get()`, `all()`, `run()`.
@@ -279,12 +285,27 @@ popd
 
 ## Текущее состояние проекта
 
+### Последние коммиты (актуальное состояние)
+
+| Коммит | Что сделано |
+|---|---|
+| `55f67b5` | fix: disable `upgrade-insecure-requests` CSP (Helmet v7 default — ломал весь сайт на HTTP) |
+| `f4f685b` | fix: 12 багов — auth, security, UX, logic (IDOR на /disk/*, реакции, chat lazy-load и др.) |
+| `2de6f0d` | fix: 13 багов — server.js + app.js (bcrypt async, SQL single-quotes, SSE payload и др.) |
+
+> ⚠️ Эти коммиты **ещё не задеплоены** на NAS (Docker rebuild нужен). SSH на NAS недоступен — деплой нужно сделать вручную через DSM или когда SSH заработает.
+
 ### Работает полностью
 - Авторизация, профили, подписки, лента, дропы
 - Чаты (DM + групповые), голосовые сообщения
 - Диск, поиск, уведомления, push
 - Adminка, верификация, жалобы
 - PWA, link preview, реакции, опросы, планировщик постов
+- CSP-hardened UI events: inline DOM handlers migrated to delegated `data-post-action` flow (no `onclick`/`on*` attributes in `public/`)
+- Observability baseline: every API response now returns `x-request-id`; error JSON includes `req_id`
+- CSP debt audit script: `npm run audit:inline-handlers`
+- DM command center: message action menu (reply/copy/edit/pin/forward/report/details/delete/save), richer file cards, media gallery tabs for photos/videos/audio/files/links, pinned/archive chats, saved messages modal, and read-receipt privacy based on the reader's own setting
+- DM archive UX guard: archived chats must remain reachable from the top-level DM page; keep the archive toggle in `/chats`, not only inside an open chat sidebar.
 
 ### Требует настройки в `.env`
 - **Email** (`RESEND_API_KEY`) — верификация и сброс пароля не работают без ключа
@@ -305,7 +326,28 @@ popd
 
 ---
 
-### 6. isSsrfBlocked() — асинхронная функция (await обязателен)
+### 6. upgrade-insecure-requests ломает HTTP-сервер
+
+**Проблема:** Helmet v7 добавляет `upgrade-insecure-requests` в CSP по умолчанию. Директива заставляет браузер делать все суб-ресурсы (скрипты, CSS, API) через HTTPS. Если сервер — HTTP (за reverse proxy), все ресурсы возвращают 503: страница загружается как белый экран, JS не запускается вообще, ни одной JS-ошибки в консоли.
+
+**Диагностика:** В DevTools → Network все ресурсы кроме HTML идут на `https://`, а не `http://`.
+
+**Фикс** (уже применён в `server.js`):
+```js
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      upgradeInsecureRequests: null, // ← отключить, сервер HTTP-only (за Cloudflare)
+      scriptSrcAttr: ["'unsafe-inline'"],
+      // ...
+    }
+  }
+}));
+```
+
+---
+
+### 7. isSsrfBlocked() — асинхронная функция (await обязателен)
 
 **Проблема:** После добавления DNS-резолвинга `isSsrfBlocked()` стала async. Вызов без `await` вернёт `Promise<boolean>` вместо `boolean` — SSRF-защита будет broken.
 
@@ -317,6 +359,79 @@ if (await isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
 // ❌ сломает защиту (Promise всегда truthy)
 if (isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
 ```
+
+---
+
+## Локальный дев-сервер (без Docker)
+
+Удобно для быстрого тестирования без пересборки Docker. Данные берутся с NAS через сетевой диск.
+
+```powershell
+# Из PowerShell на основной машине (WF, 192.168.129.161):
+cd //MedSkin/docker/w0pium
+DATA_DIR="//MedSkin/docker/w0pium/data" PORT=3001 NODE_ENV=development node server.js
+```
+
+**Важно: `NODE_ENV=development`** — без этого `.env` подтянет `production`, сессионная cookie получит флаг `Secure`, и сессии не будут работать по HTTP.
+
+Откроется на `http://192.168.129.161:3001` с того же LAN. Продакшн-сервер в Docker при этом продолжает работать на `:3000`.
+
+---
+
+## Работа с двумя параллельными агентами (Cursor)
+
+### Концепция
+
+Два агента работают **одновременно** в Cursor на одном репозитории:
+- **Агент A** (DeepSeek Reasoner) — глубокий анализ, рассуждения, планирование, сложная логика
+- **Агент B** (Claude Sonnet) — реализация, исправление кода, проверка Агента A
+
+Это НЕ разные ветки — оба агента работают на одной `main` ветке. Координация через задачи и явное разграничение зон ответственности.
+
+### Правила параллельной работы
+
+**1. Один файл — один агент в данный момент**
+Никогда не редактировать одновременно один и тот же файл. Разграничение:
+- Агент A берёт `server.js` → Агент B не трогает `server.js` пока A не сделал `git add`
+- Агент B берёт `app.js` → Агент A ждёт
+
+**2. Atomic commits — маркер завершения**
+`git commit` = сигнал "файл свободен". Другой агент может взять файл после коммита.
+
+**3. Зоны без конфликтов**
+| Агент A может | Агент B может |
+|---|---|
+| `server.js` (бэкенд) | `public/app.js` (фронтенд) |
+| `public/style.css` | `public/pages/chat.js`, `pages/drops.js` |
+| Новые API-маршруты | Новые фронтенд-страницы |
+| `package.json` | `index.html`, `manifest.json` |
+
+**4. Shared-файлы — только через очередь**
+`AGENTS.md`, `CLAUDE.md`, `docker-compose.yml` — редактировать строго по очереди, явно указывая "я беру этот файл".
+
+### Типичный сценарий
+
+```
+Агент A: "Делаю эндпоинт POST /api/events/pin в server.js"
+  → пишет код
+  → git commit "feat: add event pin endpoint"
+  → "готово, server.js свободен"
+
+Агент B: "Делаю UI для пина сообщения в app.js"
+  → читает что сделал A (через git log / git show)
+  → пишет фронтенд
+  → git commit "feat: pin message UI"
+```
+
+### Что НЕ делать параллельно
+
+- Не запускать `npm install` одновременно — локи `package-lock.json` сломаются
+- Не делать `ALTER TABLE` в двух агентах сразу — race condition в миграциях
+- Не менять `APP_VERSION` в двух местах
+
+### Синхронизация через этот файл
+
+Если агент нашёл новый баг или паттерн — **сразу добавляет в AGENTS.md** в раздел "Известные ловушки". Это база знаний для обоих агентов.
 
 ---
 
