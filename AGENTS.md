@@ -62,7 +62,14 @@
 - Роутер: функция `go(page, param)` в `app.js`.
 - Каждая страница — `render<Name>(appEl)` async-функция.
 - Real-time — SSE (`/api/events`), клиент в `initEvents()`.
+- SSE reconnect: exponential backoff 1s → 30s, сброс на `onopen`.
 - Утилиты: `window.toast` (уведомления), `window.cn` (классы).
+- Event delegation: все клики обрабатываются через `data-post-action` атрибуты.
+- Error boundary: `go()` обёрнут в try/catch, при ошибке — fallback с кнопкой "Повторить".
+- Page prefetch: на `mouseenter` навигации загружаются данные популярных страниц.
+- Upload progress: `apiWithProgress(path, formData, onProgress)` для XHR-загрузок с прогрессом.
+- `console.debug` подавлен в production (кроме localhost).
+- Изображения: `loading="lazy"` на link previews и галереях.
 
 ---
 
@@ -369,6 +376,107 @@ if (await isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
 // ❌ сломает защиту (Promise всегда truthy)
 if (isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
 ```
+
+---
+
+### 8. SSE reconnect — exponential backoff
+
+**Проблема:** `/api/events` может упасть из-за сети, Cloudflare или рестарта сервера. Без reconnect'а пользователь потеряет real-time обновления.
+
+**Фикс (уже в `app.js`):**
+```js
+let sseRetryDelay = 1000;
+function initEvents() {
+  eventSrc.onopen = () => {
+    updateRealtimeStatus(false);
+    sseRetryDelay = 1000; // сброс при успешном соединении
+  };
+  eventSrc.onerror = () => {
+    updateRealtimeStatus(true);
+    eventSrc.close();
+    const delay = sseRetryDelay;
+    sseRetryDelay = Math.min(sseRetryDelay * 2, 30_000); // max 30s
+    setTimeout(initEvents, delay);
+  };
+}
+```
+
+**Не удалять и не менять на фиксированную задержку.**
+
+---
+
+### 9. Version drift — APP_VERSION в 4 местах
+
+**Проблема:** APP_VERSION раскидана по независимым файлам. Забыть обновить хоть один — сломает cache-busting и health-маркеры.
+
+**Где менять версию:**
+1. `package.json` — `"version": "x.y.z"` (источник истины)
+2. `server.js` — читает динамически из `package.json` (`require('./package.json').version`)
+3. `public/app.js` — `const APP_VERSION = 'x.y.z'` (хардкод, менять вручную)
+4. `public/index.html` — `?v=x.y.z` на всех `<link>` и `<script>`
+
+---
+
+### 10. Логгер — pino, уровни
+
+```js
+// В server.js:
+const logger = pino({ level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'trace') });
+
+logger.fatal(e); // сервер падает
+logger.error(e); // 500, ошибки БД
+logger.warn(msg); // подозрительное, rate limit
+logger.info(msg); // старт, роуты
+logger.trace(msg); // всё подряд (бывший logger.debug — заменён глобально)
+```
+
+`RECENT_ERRORS` (массив, 5 последних) виден в `/api/health`.
+
+---
+
+### 11. Health endpoint
+
+```js
+// GET /api/health — всегда доступен (без auth)
+{
+  ok: true,
+  uptime: process.uptime(),
+  build: process.env.BUILD_ID || 'dev',
+  app_version: require('./package.json').version,
+  node: process.version,
+  recent_errors: RECENT_ERRORS.slice(-5).reverse()
+}
+```
+
+---
+
+### 12. Scheduled posts publisher
+
+```js
+// В main(), setInterval каждые 30 секунд:
+const due = all(`SELECT p.id, p.user_id FROM posts p
+  WHERE p.scheduled_at IS NOT NULL
+  AND datetime(p.scheduled_at) <= datetime('now')
+  AND p.archived=0 LIMIT 500`);
+// UPDATE scheduled_at=NULL
+// pushEvent каждому user_id — 'post_published'
+```
+
+---
+
+### 13. Event delegation (data-post-action)
+
+Все inline `onclick` заменены на делегированный обработчик. В `app.js`:
+```js
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-post-action]');
+  if (!btn) return;
+  const action = btn.dataset.postAction;
+  switch (action) { /* edit, delete, retry, ... */ }
+});
+```
+
+**Не добавляй `onclick=""` в HTML.** Используй `data-post-action="..."`.
 
 ---
 

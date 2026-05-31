@@ -179,6 +179,8 @@ get('SELECT * FROM posts WHERE content="" AND created_at > datetime("now")', [])
 - Security headers: `helmet()` applied globally
 - Banned users: kicked from sessions immediately on ban, blocked by `auth` middleware
 - Global error handler suppresses stack traces in production
+- SSRF protection: always `await isSsrfBlocked(url)` (async, not awaiting breaks protection)
+- `isSsrfBlocked()` is async — calling without `await` returns `Promise` which is always truthy
 
 **CRITICAL — Helmet CSP:** `helmet()` adds `script-src-attr 'none'` by default in v7+, which silently blocks all `onclick="..."` attribute handlers (they become `null`). Always include `scriptSrcAttr: ["'unsafe-inline'"]` in the CSP directives:
 ```js
@@ -191,6 +193,68 @@ app.use(helmet({
   }
 }));
 ```
+
+**CRITICAL — upgrade-insecure-requests:** Helmet v7 also adds `upgrade-insecure-requests` by default. This breaks HTTP servers behind reverse proxies (all sub-resources become HTTPS and return 503). Already disabled in `server.js`:
+```js
+upgradeInsecureRequests: null,
+```
+
+**CRITICAL — SQLite double quotes:** Always use single quotes for SQL string literals. Double quotes are treated as column identifiers (`SqliteError: no such column`):
+```js
+// ✅ correct
+get("SELECT * FROM posts WHERE content=''", [])
+// ❌ breaks at runtime
+get('SELECT * FROM posts WHERE content=""', [])
+```
+
+## Observability
+
+- **Health endpoint:** `GET /api/health` — returns `{ ok, uptime, build, app_version, node, recent_errors }`
+- **Build marker:** set `BUILD_ID=my-feature` env var when deploying
+- **Logger:** pino with levels `fatal/error/warn/info/trace`. `logger.debug` was globally replaced with `logger.trace`.
+- **Recent errors:** last 5 server errors exposed in `/api/health`
+- **Request IDs:** every API response has `x-request-id` header
+- **Error JSON:** server errors include `req_id` field for correlation
+
+## Frontend Event Delegation
+
+All UI interactions use `data-post-action` attributes — no `onclick=""` anywhere:
+```html
+<button data-post-action="like:123">👍</button>
+```
+```js
+// In app.js — single delegated handler:
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-post-action]');
+  if (!btn) return;
+  // handle action
+});
+```
+
+## Frontend Error Boundary
+
+Every page render in `go()` is wrapped in try/catch. On failure, a fallback with "Повторить" button is shown:
+```html
+<button class="btn btn-sm" data-post-action="retry">Повторить</button>
+```
+The `retry` action calls `go(page, pageParam, 'none')` to re-render.
+
+## SSE Reconnect
+
+Exponential backoff in `initEvents()`:
+- Start: 1s, double on each failure, max 30s
+- Reset to 1s on successful `onopen`
+- Already implemented — do not remove `sseRetryDelay`
+
+## Upload Progress
+
+For file uploads with progress bar, use `apiWithProgress(path, formData, onProgress)`:
+```js
+await apiWithProgress('/disk', fd, pct => {
+  progressEl.style.width = pct + '%';
+});
+```
+Already wired in `uploadDiskFiles()`.
 
 ## CSS Conventions
 
