@@ -19,10 +19,10 @@
 
 ```
 w0pium/
-├── server.js              # All Express routes + DB logic (single file)
+├── server.js              # All Express routes + DB logic (single file, ~3200 lines)
 ├── public/
 │   ├── index.html         # SPA shell — one page, no framework
-│   ├── app.js             # All frontend logic (~2300+ lines, vanilla JS)
+│   ├── app.js             # All frontend logic (~8000+ lines, vanilla JS)
 │   ├── style.css          # Custom CSS vars + Tailwind utilities
 │   ├── manifest.json      # PWA manifest
 │   ├── service-worker.js  # PWA service worker (cache-first assets, network-only API)
@@ -39,6 +39,13 @@ w0pium/
 │   ├── msg_images/
 │   └── disk/              # Shared file storage (DISK tab)
 ├── dist/                  # Vite production build output (git-ignored)
+├── .cursor/               # Cursor IDE config (only rules/, mcp.json, hooks.json tracked)
+│   ├── rules/             # Persistent AI guidance rules
+│   ├── mcp.json           # MCP servers (Playwright, Docker, Filesystem, SQLite, Computer-Use)
+│   └── hooks.json         # Shell guardrails (destructive command protection)
+├── .claude/commands/      # Claude Code slash commands (40+, incl. deploy, fixit)
+├── .editorconfig
+├── .nvmrc                 # Node 20 (matches Docker)
 ├── tailwind.config.js
 ├── postcss.config.js
 ├── vite.config.mjs
@@ -230,6 +237,8 @@ Available via `/` in Claude Code (`.claude/commands/`).
 ### Development
 | Command | Purpose |
 |---------|---------|
+| `/deploy` | Deploy w0pium: quick restart, rebuild, healthcheck, logs |
+| `/fixit` | Quick single-bug fix workflow |
 | `/implement` | Scaffold a new feature end-to-end |
 | `/scaffold` | Generate boilerplate for a new component/route |
 | `/fix-todos` | Resolve existing TODO comments in code |

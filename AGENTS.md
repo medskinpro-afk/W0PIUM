@@ -14,7 +14,11 @@
 | URL (прод) | https://w0pium.walfir.com |
 | Хостинг | Docker на Synology NAS, Cloudflare Tunnel |
 | Репо | `\\MedSkin\docker\w0pium\` (сетевой путь Windows) |
+| Node.js | Docker: `20-alpine` (Dockerfile). Локально: `.nvmrc` = `20`. Сейчас: `v24` |
 | Рабочая ветка | `main` |
+| MCP серверы | Playwright, Docker, Filesystem, SQLite, Computer-Use (см. `.cursor/mcp.json`) |
+| Slash-команды | 40+ в `.claude/commands/` (включая `/deploy`, `/fixit`) |
+| Shell guardrails | `.cursor/hooks.json` — блокирует опасные команды (rm -rf, git push --force, .env/data/) |
 
 ---
 
@@ -22,8 +26,8 @@
 
 ### Принцип "один файл"
 
-- **`server.js`** — весь бэкенд: Express-маршруты, логика, DB-хелперы, миграции. Один файл ~2500+ строк.
-- **`public/app.js`** — основной фронтенд: роутер, большинство страниц, SSE-клиент. ~5000+ строк.
+- **`server.js`** — весь бэкенд: Express-маршруты, логика, DB-хелперы, миграции. Один файл ~3200+ строк.
+- **`public/app.js`** — основной фронтенд: роутер, большинство страниц, SSE-клиент. ~8000+ строк.
 - **`public/pages/chat.js`** — логика чатов (голосовые, медиа-галерея, поиск по переписке). Загружается отдельно.
 - **`public/pages/drops.js`** — логика дропов (IntersectionObserver, просмотры). Загружается отдельно.
 - Нет микросервисов, нет слоёв, нет ORM.
@@ -168,14 +172,12 @@ docker restart w0pium
 
 ```bash
 curl https://w0pium.walfir.com/api/health
-# → {"ok":true,"uptime":...,"build":"<маркер>"}
+# → {"ok":true,"uptime":...,"build":"<BUILD_ID или 'dev'>","app_version":"0.9.27","recent_errors":[]}
 ```
 
-Перед деплоем обновляй `build`-маркер в `/api/health`:
-```js
-app.get('/api/health', (req, res) =>
-  res.json({ ok: true, uptime: process.uptime(), build: 'my-feature-name' })
-);
+`build` читается из `process.env.BUILD_ID` (дефолт `'dev'`). При деплое:
+```bash
+BUILD_ID=my-feature docker compose up --build -d
 ```
 
 ### Логи
@@ -217,13 +219,14 @@ app.use(helmet({
 
 ---
 
-### 3. Dockerfile: native модули после --ignore-scripts
+### 3. Dockerfile: npm ci без --ignore-scripts
 
-**Проблема:** `npm ci --ignore-scripts` нужен чтобы не упасть на `husky` (devDependency). Но `--ignore-scripts` также пропускает `postinstall` для better-sqlite3 и sharp — native bindings не компилируются, все DB-запросы падают с 500.
+**Сейчас:** Dockerfile использует `npm ci --omit=dev` (без `--ignore-scripts`). Native модули компилируются нормально.
 
-**Правильный Dockerfile:**
+**Если вернёшь `--ignore-scripts`:** не забудь `npm rebuild better-sqlite3 sharp`.
+
 ```dockerfile
-RUN npm ci --omit=dev --ignore-scripts && npm rebuild better-sqlite3 sharp
+RUN npm ci --omit=dev
 ```
 
 ---
@@ -289,9 +292,16 @@ popd
 
 | Коммит | Что сделано |
 |---|---|
-| `55f67b5` | fix: disable `upgrade-insecure-requests` CSP (Helmet v7 default — ломал весь сайт на HTTP) |
-| `f4f685b` | fix: 12 багов — auth, security, UX, logic (IDOR на /disk/*, реакции, chat lazy-load и др.) |
-| `2de6f0d` | fix: 13 багов — server.js + app.js (bcrypt async, SQL single-quotes, SSE payload и др.) |
+| `0668b4c` | chore: deploy/fixit commands, cursor hooks guardrails |
+| `c10b2ab` | chore: add MCP servers for Docker, filesystem, SQLite, computer-use |
+| `60c86b4` | chore: agent tooling — mcp.json, updated rules, .gitignore, .claude/commands/ |
+| `d424b90` | fix: async go() + full-width search inputs |
+| `5f361a8` | style: fix 3 UI/UX issues found in browser audit |
+| `124721a` | fix: SSE reconnect, upload progress, prefetch, lazy images, theme, SW, errors |
+| `9c200b3` | chore: commit remaining work — scripts, icons, docs, configs, tests |
+| `5670d5b` | fix: error boundary, scheduled posts, console.debug, APP_VERSION scope |
+| `72157a8` | fix: batch bugfix — MASTER_CODE security, rate limiters, version drift |
+| `0e8efac` | fix: restore auto-pipeline, use localhost health check, add emergency-start |
 
 > ⚠️ Эти коммиты **ещё не задеплоены** на NAS (Docker rebuild нужен). SSH на NAS недоступен — деплой нужно сделать вручную через DSM или когда SSH заработает.
 
@@ -378,6 +388,45 @@ DATA_DIR="//MedSkin/docker/w0pium/data" PORT=3001 NODE_ENV=development node serv
 
 ---
 
+## MCP серверы (Cursor)
+
+Настроены в `.cursor/mcp.json` (проектные) и `~/.cursor/mcp.json` (глобальные):
+
+| Сервер | Команда | Для чего |
+|---|---|---|
+| **Playwright** | `@playwright/mcp` | Браузерные тесты, скриншоты, навигация |
+| **Docker** | `@alisaitteke/docker-mcp` | Управление контейнерами, логи, деплой |
+| **Filesystem** | `@modelcontextprotocol/server-filesystem` | Доступ к файлам вне корня проекта (data/, бэкапы) |
+| **SQLite** | `mcp-sqlite` | Прямые SQL-запросы к `w0pium.db` |
+| **Computer-Use** | `open-computer-use-mcp` | Управление macOS: мышь, клавиатура, скриншоты |
+
+**Не включено в проект (нужны токены):**
+- **GitHub MCP** (`@modelcontextprotocol/server-github`) — добавь в `~/.cursor/mcp.json` с `GITHUB_PERSONAL_ACCESS_TOKEN`
+
+### Cursor Hooks
+
+`.cursor/hooks.json` содержит guardrails для `beforeShellExecution`:
+- Блокирует: `rm -rf` вне workspace, `git push --force`, модификацию `.env`/`data/`
+- Prompt-based (не требует скриптов)
+
+---
+
+## Slash-команды (Claude Code CLI)
+
+| Команда | Назначение |
+|---|---|
+| `/deploy` | Деплой w0pium: быстрый рестарт, rebuild, healthcheck, DSM API |
+| `/fixit` | Быстрый фикс одного бага |
+| `/commit` | Умный коммит с анализом изменений |
+| `/review` | Полный код-ревью (security, perf, quality, architecture) |
+| `/implement` | Реализация фичи с планом |
+| `/test` | Запуск тестов с контекстным детектом |
+| `/session-start` / `/session-end` | Начало/конец сессии |
+| `/refactor` / `/scaffold` | Рефакторинг / генерация болейрлейта |
+| И ещё 30+ | См. `.claude/commands/` |
+
+---
+
 ## Визуальный язык и брендинг W0PIUM
 
 W0PIUM — закрытая соцсеть для артистов. Эстетика: **raw, underground, минимализм**. Никаких ярких градиентов, никакого "стартап-глянца". Всё жёсткое, чёрное, монопространственное.
@@ -461,6 +510,19 @@ iconCut('home', 'ui-icon', 16, 16)
 | `npm-install.cmd` | npm install через `pushd` (обходит UNC-ограничение cmd.exe) |
 | `lint.cmd` / `lint.ps1` | ESLint без npm на UNC-пути |
 | `windows-docker-rebuild.ps1` | Rebuild через Docker Desktop на Windows |
+
+### npm скрипты (быстрый доступ к Docker)
+
+| Команда | Что делает |
+|---|---|
+| `npm run ops:logs` | `docker logs w0pium --tail 100 -f` |
+| `npm run ops:restart` | `docker restart w0pium` |
+| `npm run ops:exec` | `docker exec -it w0pium sh` |
+| `npm run ops:quick-deploy` | `docker cp server.js && docker restart` |
+| `npm run ops:rebuild` | `docker compose up --build -d` |
+| `npm run ops:status` | `status-report.sh` |
+| `npm run ops:checklist` | `checklist.sh` |
+| `npm run deploy:guard` | `predeploy-and-deploy.sh` |
 
 ### DSM Task Scheduler (Synology)
 
