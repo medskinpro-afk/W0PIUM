@@ -27,10 +27,6 @@ w0pium/
 │   ├── manifest.json      # PWA manifest
 │   ├── service-worker.js  # PWA service worker (cache-first assets, network-only API)
 │   ├── utils/
-│   │   ├── toast.js       # Sonner-style toast notifications (window.toast)
-│   │   └── cn.js          # clsx-style class name utility (window.cn)
-│   └── hooks/
-│       └── useVoice.js    # MediaRecorder wrapper (legacy, not loaded in index.html)
 ├── data/                  # Runtime data (git-ignored)
 │   ├── w0pium.db          # SQLite DB file (sql.js snapshot)
 │   ├── avatars/
