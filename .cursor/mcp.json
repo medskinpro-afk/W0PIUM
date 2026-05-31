@@ -3,6 +3,31 @@
     "playwright": {
       "command": "npx",
       "args": ["@playwright/mcp@latest"]
+    },
+    "docker": {
+      "command": "npx",
+      "args": ["@alisaitteke/docker-mcp"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Volumes/docker/w0pium",
+        "/Volumes/docker/w0pium/data"
+      ]
+    },
+    "sqlite": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-sqlite",
+        "/Volumes/docker/w0pium/data/w0pium.db"
+      ]
+    },
+    "computer-use": {
+      "command": "npx",
+      "args": ["-y", "open-computer-use-mcp"]
     }
   }
 }
