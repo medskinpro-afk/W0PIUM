@@ -114,6 +114,32 @@ Three-state flow built directly into the chat composer:
 
 Key functions: `startRecording(cid)`, `stopRecordingPreview()`, `cancelRecording()`, `sendVoiceMessage(cid, blob, mime)`
 
+## Upload Progress (file uploads to Disk)
+
+Use `apiWithProgress(path, formData, onProgress)` for file uploads that need a progress bar:
+
+```js
+await apiWithProgress('/disk', fd, pct => {
+  progressEl.style.width = pct + '%';
+});
+```
+
+Already wired in `uploadDiskFiles()` — shows per-file name + percentage in `#diskProgress`.
+
+## Error Boundary
+
+Every page render in `go()` is wrapped in try/catch. If a render function throws, the user sees a fallback with a retry button:
+
+```html
+<button class="btn btn-sm" data-post-action="retry">Повторить</button>
+```
+
+The `data-post-action="retry"` handler calls `go(page, pageParam, 'none')` to re-render.
+
+## Page Prefetch
+
+Nav items have a `mouseenter` listener that fires `prefetchPage()` — it makes a low-priority `fetch()` to preload API data for common pages (feed, chats, discover, notifs, disk, artists). No need to manually wire new nav items.
+
 ## CSS Conventions
 
 - Design tokens in `:root {}` in `style.css` — reference with `var(--name)`

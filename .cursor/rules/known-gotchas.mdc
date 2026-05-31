@@ -45,16 +45,7 @@ if (await isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
 if (isSsrfBlocked(url)) return res.status(400).json({ error: 'Blocked' });
 ```
 
----
-
-## 4. Dockerfile: native modules need explicit rebuild after --ignore-scripts
-
-**Problem:** `npm ci --ignore-scripts` skips `postinstall` for better-sqlite3 and sharp — native bindings aren't compiled, all DB calls throw 500.
-
-**Correct Dockerfile line (already in place, do not change):**
-```dockerfile
-RUN npm ci --omit=dev --ignore-scripts && npm rebuild better-sqlite3 sharp
-```
+| **Heads-up:** the Dockerfile currently uses plain `npm ci --omit=dev` (no `--ignore-scripts`), so native modules compile normally. If you ever re-add `--ignore-scripts`, remember to also `npm rebuild better-sqlite3 sharp`.
 
 ---
 
@@ -75,7 +66,40 @@ git config --global --add safe.directory "//MedSkin/docker/w0pium"
 
 ---
 
-## 7. General security rules
+## 7. Version drift — bump in 4 places
+
+**Problem:** The app version is spread across independent files. Forgetting any one causes cache-bust mismatches or stale health markers.
+
+**All places to bump:**
+1. `public/app.js` — `const APP_VERSION = 'x.y.z'`
+2. `public/index.html` — `?v=x.y.z` on CSS/JS `<link>` and `<script>` tags
+3. `server.js` — `APP_VERSION` is read from `package.json` dynamically (auto), but check the health endpoint
+4. `package.json` — the source of truth for `APP_VERSION`
+
+**Heads-up:** `public/app.js` has a hardcoded `APP_VERSION` string. When releasing, update all non-dynamic references.
+
+---
+
+## 8. SSE EventSource reconnect
+
+**Problem:** `/api/events` can drop due to network glitches, Cloudflare timeouts, or server restart. The old code retried after a fixed 3s — too fast for sustained outages.
+
+**Fix (already applied):** Exponential backoff from 1s → max 30s, reset on successful `onopen`.
+
+```js
+// Current pattern in initEvents():
+sseRetryDelay = 1000; // reset in onopen
+// onerror:
+const delay = sseRetryDelay;
+sseRetryDelay = Math.min(sseRetryDelay * 2, 30_000);
+setTimeout(initEvents, delay);
+```
+
+**Do not remove `sseRetryDelay` or revert to fixed delay.**
+
+---
+
+## 9. General security rules
 
 - No SQL string interpolation — always use parameterized queries
 - No stack traces in production — global error handler suppresses them

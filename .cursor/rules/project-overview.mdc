@@ -13,9 +13,9 @@ Repo: `\\MedSkin\docker\w0pium\`
 
 | Layer     | Tech                                                        |
 |-----------|-------------------------------------------------------------|
-| Backend   | Node.js 20 / Express 4 — single file `server.js` (~2500+ lines) |
+| Backend   | Node.js 20 / Express 4 — single file `server.js` (~3200+ lines) |
 | Database  | better-sqlite3 (synchronous SQLite, no ORM)                 |
-| Frontend  | Vanilla JS SPA — no React, no TypeScript — single file `public/app.js` (~5000+ lines) |
+| Frontend  | Vanilla JS SPA — no React, no TypeScript — single file `public/app.js` (~8000+ lines) |
 | Realtime  | Server-Sent Events (`/api/events`)                          |
 | Auth      | Session cookie (`httpOnly`, `sameSite: lax`)                |
 | Email     | Resend API via native `fetch()`                             |

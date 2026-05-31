@@ -38,12 +38,12 @@ curl https://w0pium.walfir.com/api/health
 # → {"ok":true,"uptime":...,"build":"<marker>"}
 ```
 
-Update the `build` marker in `/api/health` before deploying so you can confirm what's live:
-```js
-app.get('/api/health', (req, res) =>
-  res.json({ ok: true, uptime: process.uptime(), build: 'my-feature-name' })
-);
+Update the `build` marker before deploying to confirm what's live (set `BUILD_ID` env var or it defaults to `'dev'`):
+```bash
+BUILD_ID=my-feature docker compose up --build -d
 ```
+
+Health endpoint now also exposes `recent_errors` (last 5) and `app_version` from `package.json`.
 
 ## Logs
 
