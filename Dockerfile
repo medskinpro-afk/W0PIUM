@@ -1,6 +1,6 @@
-FROM node:20-alpine
-
-RUN apk add --no-cache python3 make g++
+# node:20-slim (Debian/glibc) lets better-sqlite3 and sharp use pre-built
+# binaries — npm ci takes ~90s instead of 25+ min on Alpine/musl.
+FROM node:20-slim
 
 WORKDIR /app
 
