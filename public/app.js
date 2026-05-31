@@ -3,6 +3,8 @@ const APP_VERSION = '0.9.27';
 
 // ── IMAGE LIGHTBOX ──
 function openImg(src) {
+  const existing = document.getElementById('lightbox');
+  if (existing) existing.remove();
   const lb = document.createElement('div');
   lb.id = 'lightbox';
   const backdrop = document.createElement('div');
@@ -202,6 +204,7 @@ let msgPoll = null;
 let lastMsgTime = '';
 let eventSrc = null;
 let sseRetryDelay = 1000;
+let sseReconnectTimer = null;
 let chatsCache = [];
 let chatListShowArchived = false;
 let currentChatId = null;
@@ -221,7 +224,7 @@ try {
 } catch (e) { console.debug('pendingChatQueue parse failed:', e.message); pendingChatQueue = []; }
 
 function persistPendingChatQueue() {
-  try { localStorage.setItem('pending_chat_queue', JSON.stringify(pendingChatQueue.slice(-50))); } catch (e) { console.debug('pendingChatQueue persist failed:', e.message); }
+  try { saLSet('pending_chat_queue', JSON.stringify(pendingChatQueue.slice(-50))); } catch (e) { console.debug('pendingChatQueue persist failed:', e.message); }
 }
 
 function chatIsMuted(c) {
@@ -314,10 +317,12 @@ function apiWithProgress(path, formData, onProgress) {
   });
 }
 
+function saLSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+
 // ── THEME ──
 function applyTheme(theme) {
   document.documentElement.classList.toggle('light', theme === 'light');
-  localStorage.setItem('theme', theme);
+  saLSet('theme', theme);
 }
 function toggleTheme() {
   const current = document.documentElement.classList.contains('light') ? 'light' : 'dark';
@@ -374,6 +379,7 @@ let feedSort = localStorage.getItem('feedSort') || 'fresh';
  * 'typing' and 'chat_invite' events.
  */
 function initEvents() {
+  if (sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null; }
   if (eventSrc) {
     try { eventSrc.close(); } catch (e) { console.debug('eventSrc.close failed:', e.message); }
   }
@@ -508,11 +514,10 @@ function initEvents() {
   });
   eventSrc.onerror = () => {
     updateRealtimeStatus(true);
-    eventSrc.close();
-    eventSrc = null;
+    if (eventSrc) { eventSrc.close(); eventSrc = null; }
     const delay = sseRetryDelay;
     sseRetryDelay = Math.min(sseRetryDelay * 2, 30_000); // max 30s
-    setTimeout(initEvents, delay);
+    sseReconnectTimer = setTimeout(initEvents, delay);
   };
 }
 
@@ -597,7 +602,7 @@ function updateMessage(mid, content, edited_at) {
     if (type.startsWith('image/')) {
       parts.push(`<div class="msg-img"><img src="${esc(file)}" loading="lazy" alt=""></div>`);
     } else {
-      const label = type.split('/')[1] || 'file';
+      const label = esc(type.split('/')[1] || 'file');
       parts.push(`<div class="msg-file"><a href="${esc(file)}" target="_blank">[${label}]</a></div>`);
     }
   }
@@ -1095,16 +1100,16 @@ function prefetchPage(pageName, pageParam) {
       case 'go': return go(postActionEl.dataset.navTarget || 'feed');
       case 'follow-suggested': return followSuggested(postActionEl.dataset.userId || '', postActionEl);
       case 'dismiss-social-onboarding':
-        localStorage.setItem('social_onboarding_dismissed', '1');
+        saLSet('social_onboarding_dismissed', '1');
         postActionEl.closest('.social-card')?.remove();
         return;
       case 'discover-sort':
         discoverSort = postActionEl.dataset.sort || 'fresh';
-        localStorage.setItem('discoverSort', discoverSort);
+        saLSet('discoverSort', discoverSort);
         return renderDiscover(document.getElementById('app'));
       case 'feed-sort':
         feedSort = postActionEl.dataset.sort || 'fresh';
-        localStorage.setItem('feedSort', feedSort);
+        saLSet('feedSort', feedSort);
         return renderFeed(document.getElementById('app'));
       case 'refresh-feed': return renderFeed(document.getElementById('app'));
       case 'refresh-drops': return renderDrops(document.getElementById('app'));
@@ -1438,7 +1443,9 @@ function prefetchPage(pageName, pageParam) {
 }
 
 // ── ROUTER ──
+let _navGen = 0;
 async function go(p, param, _hist = 'push') {
+  const gen = ++_navGen;
   if (dirtySettings && page === 'settings' && p !== 'settings') {
     if (!confirm('Есть несохранённые изменения. Уйти без сохранения?')) return;
     dirtySettings = false;
@@ -1483,8 +1490,12 @@ async function go(p, param, _hist = 'push') {
   }
   // stop chat polling when switching pages
   if (msgPoll) { clearInterval(msgPoll); msgPoll = null; }
+  // clear SSE reconnect timer when navigating away
+  if (sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null; }
   // clear infinite scroll handler when navigating away
   window.onscroll = null;
+  // Clean up drops IntersectionObserver
+  if (window._dropViewObserver) { window._dropViewObserver.disconnect(); window._dropViewObserver = null; }
   const app = $('#app');
   app.innerHTML = '<div class="empty empty-big">· · ·</div>';
 
@@ -1510,7 +1521,9 @@ async function go(p, param, _hist = 'push') {
   };
   try {
     await (routes[p] || routes.discover)();
+    if (gen !== _navGen) return; // superseded by newer navigation
   } catch (e) {
+    if (gen !== _navGen) return;
     console.error('Page render failed:', p, e);
     app.innerHTML = `<div class="empty empty-big" style="padding:4rem 1rem;text-align:center">
       <div style="font-size:2rem;margin-bottom:1rem;opacity:0.3">✕</div>
@@ -2269,6 +2282,7 @@ async function renderFeed(app) {
         }
         try {
           const more = await api(`/feed?offset=${feedOffset}&limit=${feedLimit}&sort=${encodeURIComponent(feedSort)}`);
+          if (page !== 'feed') return; // navigated away
           if (more && more.length) {
             const cont = document.getElementById('posts');
             cont.insertAdjacentHTML('beforeend', more.map(postHtml).join(''));
@@ -2329,6 +2343,7 @@ async function renderDiscover(app) {
         discFetching = true;
         try {
           const more = await api(`/discover?offset=${discOffset}&limit=${discLimit}&sort=${encodeURIComponent(discoverSort)}`);
+          if (page !== 'discover') return; // navigated away
           if (more && more.length) {
             const cont = document.getElementById('posts');
             cont.insertAdjacentHTML('beforeend', more.map(postHtml).join(''));
@@ -2493,7 +2508,7 @@ function bindComposerImg() {
   if (ta) {
     const draft = localStorage.getItem('draft_post') || '';
     if (draft) { ta.value = draft; ta.dispatchEvent(new Event('input')); }
-    ta.addEventListener('input', () => localStorage.setItem('draft_post', ta.value));
+    ta.addEventListener('input', () => saLSet('draft_post', ta.value));
   }
   // track preview
   const trackInp = $('#cTrack');
@@ -2912,20 +2927,24 @@ async function renderHashtag(app, tag) {
 
 // ── ARTISTS ──
 async function renderArtists(app) {
-  const artists = await api('/artists');
-  app.innerHTML = `
-    ${opiumCommandStrip('')}
-    ${pageTitleIc('profile', 'ARTISTS')}
-    ${opiumMetricCards([
-      { label: 'network', value: artists.length, note: 'artists inside' },
-      { label: 'access', value: 'invite', note: 'closed graph' },
-      { label: 'signal', value: 'profiles', note: 'links and posts' },
-    ])}
-    <div class="search-wrap"><input class="input" id="artistsSearchInput" type="text" placeholder="Поиск артистов..."></div>
-    <div id="artList">${artists.length ? artists.map(artRow).join('') : `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('profile', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Пока никого нет</div><div class="onboarding-text">Здесь появятся все артисты сети — зови друзей!</div></div>`}</div>
-  `;
-  const searchInput = document.getElementById('artistsSearchInput');
-  if (searchInput) searchInput.addEventListener('input', e => searchArt(e.target.value));
+  try {
+    const artists = await api('/artists');
+    app.innerHTML = `
+      ${opiumCommandStrip('')}
+      ${pageTitleIc('profile', 'ARTISTS')}
+      ${opiumMetricCards([
+        { label: 'network', value: artists.length, note: 'artists inside' },
+        { label: 'access', value: 'invite', note: 'closed graph' },
+        { label: 'signal', value: 'profiles', note: 'links and posts' },
+      ])}
+      <div class="search-wrap"><input class="input" id="artistsSearchInput" type="text" placeholder="Поиск артистов..."></div>
+      <div id="artList">${artists.length ? artists.map(artRow).join('') : `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('profile', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Пока никого нет</div><div class="onboarding-text">Здесь появятся все артисты сети — зови друзей!</div></div>`}</div>
+    `;
+    const searchInput = document.getElementById('artistsSearchInput');
+    if (searchInput) searchInput.addEventListener('input', e => searchArt(e.target.value));
+  } catch (e) {
+    app.innerHTML = `<div class="empty">Ошибка загрузки: ${esc(e.message)}</div>`;
+  }
 }
 
 function artRow(a) {
@@ -2945,13 +2964,23 @@ let _st;
 function searchArt(q) {
   clearTimeout(_st);
   _st = setTimeout(async () => {
-    if (!q.trim()) {
-      const a = await api('/artists');
-      $('#artList').innerHTML = a.length ? a.map(artRow).join('') : `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('profile', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Пока никого нет</div><div class="onboarding-text">Здесь появятся все артисты сети — зови друзей!</div></div>`;
-      return;
+    try {
+      if (!document.getElementById('artList')) return; // page was left
+      if (!q.trim()) {
+        const a = await api('/artists');
+        const el = $('#artList');
+        if (!el) return;
+        el.innerHTML = a.length ? a.map(artRow).join('') : `<div class="onboarding-empty"><div class="onboarding-icon">${iconCut('profile', 'ui-icon', 28, 28)}</div><div class="onboarding-title">Пока никого нет</div><div class="onboarding-text">Здесь появятся все артисты сети — зови друзей!</div></div>`;
+        return;
+      }
+      const r = await api('/search?q=' + encodeURIComponent(q) + '&type=users');
+      const el = $('#artList');
+      if (!el) return;
+      el.innerHTML = r.users && r.users.length ? r.users.map(artRow).join('') : '<div class="empty">Ничего не найдено</div>';
+    } catch (e) {
+      const el = $('#artList');
+      if (el) el.innerHTML = '<div class="empty">Ошибка загрузки</div>';
     }
-    const r = await api('/search?q=' + encodeURIComponent(q) + '&type=users');
-    $('#artList').innerHTML = r.users && r.users.length ? r.users.map(artRow).join('') : '<div class="empty">Ничего не найдено</div>';
   }, 250);
 }
 
@@ -2976,7 +3005,7 @@ async function renderSearch(app, initQuery) {
   const persistRecent = q => {
     if (!q || q.length < 2) return;
     recentSearches = [q, ...recentSearches.filter(x => x !== q)].slice(0, 8);
-    try { localStorage.setItem('search_recent_queries', JSON.stringify(recentSearches)); } catch {}
+    try { saLSet('search_recent_queries', JSON.stringify(recentSearches)); } catch {}
   };
   app.innerHTML = `
     ${searchCoreHeader}
@@ -3515,7 +3544,7 @@ async function renderSettings(app) {
 function switchSettingsTab(tab, persist = true) {
   const valid = new Set(['profile', 'privacy', 'access', 'security']);
   settingsTab = valid.has(tab) ? tab : 'profile';
-  if (persist) localStorage.setItem('settingsTab', settingsTab);
+  if (persist) saLSet('settingsTab', settingsTab);
   document.querySelectorAll('.settings-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.settingsTab === settingsTab);
   });
@@ -3890,7 +3919,7 @@ async function renderChat(app, cid) {
   if (window._prevChatId && window._prevChatId !== cid) {
     const prevTxt = document.getElementById('msgText');
     if (prevTxt && prevTxt.value.trim()) {
-      localStorage.setItem(`draft_${window._prevChatId}`, prevTxt.value);
+      saLSet(`draft_${window._prevChatId}`, prevTxt.value);
     } else {
       localStorage.removeItem(`draft_${window._prevChatId}`);
     }
@@ -4214,7 +4243,7 @@ async function renderChat(app, cid) {
           typingThrottle = now;
           api('/chats/' + cid + '/typing', { method: 'POST' }).catch(() => {});
         }
-        localStorage.setItem(`draft_${cid}`, freshTxtEl.value);
+        saLSet(`draft_${cid}`, freshTxtEl.value);
         updateChatSendReady();
       });
       freshTxtEl.addEventListener('keydown', e => {
@@ -4599,7 +4628,7 @@ function msgHtml(m, prev, next) {
       <button class="msg-more-btn" data-post-action="open-msg-menu" data-msg-id="${m.id}" data-conv-id="${currentChatId}" data-mine="${mine ? '1' : '0'}" data-saved="${m.saved ? '1' : '0'}" data-has-file="${m.file ? '1' : '0'}" data-file-name="${esc(m.file_name || '')}" data-file-size="${esc(String(m.file_size || 0))}" data-msg-text="${esc(msgMenuText)}" title="Actions">${iconCut('more-horizontal', 'ui-icon', 15, 15)}</button>
     </div>`;
   return `
-    <div class="msg ${mine ? 'me' : ''} ${clusterClass}" data-id="${m.id}" data-sender="${m.sender_id ?? ''}" data-created="${m.created_at}" data-saved="${m.saved ? '1' : '0'}" data-file="${m.file || ''}" data-file-type="${m.file_type || ''}" data-file-name="${esc(m.file_name || '')}" data-file-size="${esc(String(m.file_size || 0))}" data-msg-text="${esc(msgMenuText)}" data-author="${esc(m.display_name || m.username || '')}">
+    <div class="msg ${mine ? 'me' : ''} ${clusterClass}" data-id="${esc(m.id)}" data-sender="${esc(m.sender_id ?? '')}" data-created="${esc(m.created_at)}" data-saved="${m.saved ? '1' : '0'}" data-file="${esc(m.file || '')}" data-file-type="${esc(m.file_type || '')}" data-file-name="${esc(m.file_name || '')}" data-file-size="${esc(String(m.file_size || 0))}" data-msg-text="${esc(msgMenuText)}" data-author="${esc(m.display_name || m.username || '')}">
       ${mine ? '' : avatarEl(m.avatar, 'avatar-sm', initial(m.display_name))}
       <div class="msg-body">
         ${parts.join('')}
@@ -5034,7 +5063,8 @@ function scrollToMsg(mid) {
 }
 
 function openVideo(src) {
-  if (document.getElementById('lightbox')) return;
+  const existing = document.getElementById('lightbox');
+  if (existing) existing.remove();
   const lb = document.createElement('div');
   lb.id = 'lightbox';
   const backdrop = document.createElement('div');
@@ -5215,6 +5245,8 @@ async function startRecording(cid) {
   mediaRecorder.onstop = () => {
     stream.getTracks().forEach(t => t.stop());
     clearInterval(recordingInterval);
+    if (window._voiceWaveAnim) { cancelAnimationFrame(window._voiceWaveAnim); window._voiceWaveAnim = null; }
+    if (window._voiceAudioCtx) { window._voiceAudioCtx.close(); window._voiceAudioCtx = null; }
     setVoiceBtn(false);
     if (recordingCancelled || audioChunks.length === 0) {
       vrWantPreview = false;
@@ -5336,6 +5368,8 @@ async function sendVoiceMessage(cid, blob, mimeType) {
   } catch (e) {
     toast.error('Ошибка отправки: ' + e.message);
   } finally {
+    if (window._voiceWaveAnim) { cancelAnimationFrame(window._voiceWaveAnim); window._voiceWaveAnim = null; }
+    if (window._voiceAudioCtx) { window._voiceAudioCtx.close(); window._voiceAudioCtx = null; }
     document.getElementById('composerNormal')?.classList.remove('hidden');
   }
 }
@@ -6865,7 +6899,7 @@ function renderDiskInspector(folders = diskGetVisibleFolders(), files = _diskFil
 
 function setDiskView(v) {
   diskView = v;
-  localStorage.setItem('diskView', v);
+  saLSet('diskView', v);
   document.getElementById('diskBtnGrid')?.classList.toggle('active', v === 'grid');
   document.getElementById('diskBtnList')?.classList.toggle('active', v === 'list');
   renderDiskFiles();
@@ -6882,8 +6916,8 @@ function setDiskFilter(f) {
 function setDiskSort(field) {
   if (diskSort === field) diskSortDir = diskSortDir === 'desc' ? 'asc' : 'desc';
   else { diskSort = field; diskSortDir = field === 'name' ? 'asc' : 'desc'; }
-  localStorage.setItem('diskSort', diskSort);
-  localStorage.setItem('diskSortDir', diskSortDir);
+  saLSet('diskSort', diskSort);
+  saLSet('diskSortDir', diskSortDir);
   updateDiskSortUI();
   renderDiskFiles();
 }
@@ -7910,8 +7944,8 @@ async function jumpToMessage(mid, cid) {
   // Otherwise load context from server
   if (cid !== currentChatId) {
     await renderChat(document.getElementById('app'), cid);
-    // try again after render
     setTimeout(() => {
+      if (page !== 'chat' || currentChatId !== cid) return;
       const el2 = document.querySelector(`[data-id="${mid}"]`);
       if (el2) { el2.scrollIntoView({ behavior: 'smooth', block: 'center' }); highlightMsg(el2); }
     }, 300);

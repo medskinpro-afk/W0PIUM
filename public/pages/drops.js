@@ -11,9 +11,12 @@
 /**
  * Mark all visible drops as viewed immediately when user scrolls to them.
  * Enhances the default view tracking with IntersectionObserver.
+ * Uses a singleton observer that gets disconnected on each re-render.
  */
 function initDropViewTracking() {
   if (!window.IntersectionObserver) return;
+  if (window._dropViewObserver) window._dropViewObserver.disconnect();
+
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (!entry.isIntersecting) return;
@@ -26,6 +29,7 @@ function initDropViewTracking() {
     });
   }, { threshold: 0.5 });
 
+  window._dropViewObserver = observer;
   document.querySelectorAll('.drop[data-id]').forEach(el => observer.observe(el));
 }
 

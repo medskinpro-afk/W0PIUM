@@ -528,7 +528,9 @@ function main() {
     if (!clients.has(uid)) clients.set(uid, []);
     clients.get(uid).push(res);
     res.write(': connected\n\n');
-    req.on('close', () => { clients.set(uid, (clients.get(uid)||[]).filter(r => r !== res)); });
+    const removeClient = () => { clients.set(uid, (clients.get(uid)||[]).filter(r => r !== res)); };
+    req.on('close', removeClient);
+    req.on('error', removeClient);
   });
 
   const imgFilter = (req, file, cb) => /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype) ? cb(null, true) : cb(new Error('Only images'));
@@ -556,6 +558,13 @@ function main() {
     if (now - last > 60_000) { // update at most once per minute
       lastSeenCache.set(s.user_id, now);
       run('UPDATE users SET last_seen=datetime(\'now\') WHERE id=?', [s.user_id]);
+      // Evict stale entries when cache grows large
+      if (lastSeenCache.size > 10000) {
+        const cutoff = now - 10 * 60 * 1000;
+        for (const uid of lastSeenCache.keys()) {
+          if (lastSeenCache.get(uid) < cutoff) lastSeenCache.delete(uid);
+        }
+      }
     }
     next();
   }
@@ -624,7 +633,15 @@ function main() {
     const list = clients.get(userId);
     if (!list) return;
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    list.forEach(res => { try { res.write(payload); } catch (e) { logger.trace({ userId, event, error: e.message }, 'SSE write failed'); } });
+    const alive = list.filter(res => {
+      try { res.write(payload); return true; }
+      catch (e) {
+        logger.trace({ userId, event, error: e.message }, 'SSE write failed — removing dead client');
+        return false;
+      }
+    });
+    if (alive.length === 0) clients.delete(userId);
+    else clients.set(userId, alive);
   }
   function genCode() { return crypto.randomBytes(4).toString('hex').toUpperCase().slice(0,6); }
   function ensureInviteCode(userId) {
@@ -802,33 +819,37 @@ function main() {
   }
 
   // AUTH
-  app.post('/api/register', limiterRegister, async (req, res) => {
-    const { username, display_name, password, email, invite_code } = req.body;
-    if (!username||!password||!display_name||!email) return res.status(400).json({ error:'Заполни все поля' });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error:'Неверный формат email' });
-    if (username.length<2||username.length>24) return res.status(400).json({ error:'Username 2-24 символов' });
-    if (!/^[a-z0-9_]+$/.test(username)) return res.status(400).json({ error:'Только a-z, 0-9, _' });
-    if (password.length<8) return res.status(400).json({ error:'Пароль должен быть не менее 8 символов' });
-    const hasLetter = /[a-zA-Zа-яА-Я]/.test(password);
-    const hasDigit  = /[0-9]/.test(password);
-    if (!hasLetter || !hasDigit) return res.status(400).json({ error: 'Пароль должен содержать буквы и цифры' });
-    if (INVITE_ONLY) {
-      if (!invite_code) return res.status(400).json({ error:'Нужен инвайт-код' });
-      const upper = invite_code.toUpperCase();
-      if (upper !== MASTER_CODE && !get('SELECT id FROM users WHERE invite_code=?', [upper]))
-        return res.status(400).json({ error:'Неверный инвайт-код' });
-    }
-    if (get('SELECT id FROM users WHERE LOWER(username)=LOWER(?)', [username])) return res.status(409).json({ error:'Username занят' });
-    if (get('SELECT id FROM users WHERE email_hash=?', [hashEmail(email)])) return res.status(409).json({ error:'Email уже используется' });
-    const id = uuidv4(), hash = bcrypt.hashSync(password,10), myCode = genCode();
-    const verifyToken = String(crypto.randomInt(100000, 1000000));
-    const tokenExp = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-    const usedCode = invite_code ? invite_code.toUpperCase() : '';
-    run('INSERT INTO users (id,username,display_name,password,invite_code,used_code,email,email_hash,email_token,email_token_exp) VALUES(?,?,?,?,?,?,?,?,?,?)',
-      [id,username,display_name,hash,myCode,usedCode,encryptEmail(email),hashEmail(email),verifyToken,tokenExp]);
-    await sendEmail(email, 'W0PIUM — подтверди email',
-      `<p>Привет, ${display_name}!</p><p>Твой код подтверждения: <strong style="font-size:24px;letter-spacing:4px">${verifyToken}</strong></p><p>Действует 15 минут.</p>`);
-    res.json({ ok:1, pending:true });
+  app.post('/api/register', limiterRegister, async (req, res, next) => {
+    try {
+      const { username, display_name, password, email, invite_code } = req.body;
+      if (!username||!password||!display_name||!email) return res.status(400).json({ error:'Заполни все поля' });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error:'Неверный формат email' });
+      if (username.length<2||username.length>24) return res.status(400).json({ error:'Username 2-24 символов' });
+      if (!/^[a-z0-9_]+$/.test(username)) return res.status(400).json({ error:'Только a-z, 0-9, _' });
+      if (password.length<8) return res.status(400).json({ error:'Пароль должен быть не менее 8 символов' });
+      const hasLetter = /[a-zA-Zа-яА-Я]/.test(password);
+      const hasDigit  = /[0-9]/.test(password);
+      if (!hasLetter || !hasDigit) return res.status(400).json({ error: 'Пароль должен содержать буквы и цифры' });
+      if (INVITE_ONLY) {
+        if (!invite_code) return res.status(400).json({ error:'Нужен инвайт-код' });
+        const upper = invite_code.toUpperCase();
+        if (upper !== MASTER_CODE && !get('SELECT id FROM users WHERE invite_code=?', [upper]))
+          return res.status(400).json({ error:'Неверный инвайт-код' });
+      }
+      if (get('SELECT id FROM users WHERE LOWER(username)=LOWER(?)', [username])) return res.status(409).json({ error:'Username занят' });
+      if (get('SELECT id FROM users WHERE email_hash=?', [hashEmail(email)])) return res.status(409).json({ error:'Email уже используется' });
+      const id = uuidv4(), hash = bcrypt.hashSync(password,10), myCode = genCode();
+      const verifyToken = String(crypto.randomInt(100000, 1000000));
+      const tokenExp = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      const usedCode = invite_code ? invite_code.toUpperCase() : '';
+      run('INSERT INTO users (id,username,display_name,password,invite_code,used_code,email,email_hash,email_token,email_token_exp) VALUES(?,?,?,?,?,?,?,?,?,?)',
+        [id,username,display_name,hash,myCode,usedCode,encryptEmail(email),hashEmail(email),verifyToken,tokenExp]);
+      try {
+        await sendEmail(email, 'W0PIUM — подтверди email',
+          `<p>Привет, ${display_name}!</p><p>Твой код подтверждения: <strong style="font-size:24px;letter-spacing:4px">${verifyToken}</strong></p><p>Действует 15 минут.</p>`);
+      } catch (e) { logger.warn({ error: e.message }, 'registration email failed'); }
+      res.json({ ok:1, pending:true });
+    } catch (e) { next(e); }
   });
 
   app.post('/api/login', limiterLogin, (req, res) => {
@@ -899,21 +920,24 @@ function main() {
     res.json({ ok:1 });
   });
 
-  app.post('/api/reset-password', limiterResetPwd, async (req, res) => {
-    const { email, token, password } = req.body;
-    if (!email || !token || !password || password.length < 8) return res.status(400).json({ error:'Заполни все поля' });
-    const u = get('SELECT id,reset_token,reset_token_exp FROM users WHERE email_hash=?', [hashEmail(email)]);
-    if (!u || u.reset_token !== token) return res.status(400).json({ error:'Неверный код' });
-    if (!u.reset_token_exp || new Date(u.reset_token_exp) < new Date()) return res.status(400).json({ error:'Код устарел' });
-    const hash = await bcrypt.hash(password, 10);
-    run('UPDATE users SET password=?, reset_token=NULL, reset_token_exp=NULL WHERE id=?', [hash, u.id]);
-    // Invalidate all existing sessions after password reset
-    run('DELETE FROM sessions WHERE user_id=?', [u.id]);
-    res.json({ ok:1 });
+  app.post('/api/reset-password', limiterResetPwd, async (req, res, next) => {
+    try {
+      const { email, token, password } = req.body;
+      if (!email || !token || !password || password.length < 8) return res.status(400).json({ error:'Заполни все поля' });
+      const u = get('SELECT id,reset_token,reset_token_exp FROM users WHERE email_hash=?', [hashEmail(email)]);
+      if (!u || u.reset_token !== token) return res.status(400).json({ error:'Неверный код' });
+      if (!u.reset_token_exp || new Date(u.reset_token_exp) < new Date()) return res.status(400).json({ error:'Код устарел' });
+      const hash = await bcrypt.hash(password, 10);
+      run('UPDATE users SET password=?, reset_token=NULL, reset_token_exp=NULL WHERE id=?', [hash, u.id]);
+      // Invalidate all existing sessions after password reset
+      run('DELETE FROM sessions WHERE user_id=?', [u.id]);
+      res.json({ ok:1 });
+    } catch (e) { next(e); }
   });
 
   const doLogout = (req, res) => {
-    run('DELETE FROM sessions WHERE token=?', [req.cookies.token||req.headers['x-token']]);
+    const token = req.cookies.token || req.headers['x-token'];
+    if (token) run('DELETE FROM sessions WHERE token=?', [token]);
     res.clearCookie('token');
     if (req.method === 'GET') return res.redirect('/');
     res.json({ ok:1 });
@@ -957,17 +981,20 @@ function main() {
       [display_name||'',bio||'',link_sc,link_ig,link_tg,link_spotify,link_site,is_private?1:0,dm_requests?1:0,show_read_receipts?1:0,show_typing?1:0,req.uid]);
     res.json({ ok:1 });
   });
-  app.put('/api/password', auth, limiterPasswordChange, async (req, res) => {
-    const { old_password,new_password } = req.body||{};
-    if (!old_password||!new_password) return res.status(400).json({ error:'Заполни все поля' });
-    if (new_password.length<8) return res.status(400).json({ error:'Пароль должен быть не менее 8 символов' });
-    const _hasLetter = /[a-zA-Zа-яА-Я]/.test(new_password);
-    const _hasDigit  = /[0-9]/.test(new_password);
-    if (!_hasLetter || !_hasDigit) return res.status(400).json({ error: 'Пароль должен содержать буквы и цифры' });
-    const u = get('SELECT password FROM users WHERE id=?', [req.uid]);
-    if (!u||!bcrypt.compareSync(old_password,u.password)) return res.status(400).json({ error:'Неверный текущий пароль' });
-    run('UPDATE users SET password=? WHERE id=?', [await bcrypt.hash(new_password,10),req.uid]);
-    res.json({ ok:1 });
+  app.put('/api/password', auth, limiterPasswordChange, async (req, res, next) => {
+    try {
+      const { old_password,new_password } = req.body||{};
+      if (!old_password||!new_password) return res.status(400).json({ error:'Заполни все поля' });
+      if (new_password.length<8) return res.status(400).json({ error:'Пароль должен быть не менее 8 символов' });
+      const _hasLetter = /[a-zA-Zа-яА-Я]/.test(new_password);
+      const _hasDigit  = /[0-9]/.test(new_password);
+      if (!_hasLetter || !_hasDigit) return res.status(400).json({ error: 'Пароль должен содержать буквы и цифры' });
+      const u = get('SELECT password FROM users WHERE id=?', [req.uid]);
+      if (!u||!bcrypt.compareSync(old_password,u.password)) return res.status(400).json({ error:'Неверный текущий пароль' });
+      const hash = await bcrypt.hash(new_password, 10);
+      run('UPDATE users SET password=? WHERE id=?', [hash, req.uid]);
+      res.json({ ok:1 });
+    } catch (e) { next(e); }
   });
   app.delete('/api/me', auth, limiterAccountDelete, (req, res) => {
     cleanUserFiles(req.uid);
@@ -1884,14 +1911,13 @@ function main() {
     const url = (req.query.url || '').trim();
     if (!url || !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'Invalid URL' });
     if (await isSsrfBlocked(url)) return res.status(400).json({ error: 'Invalid URL' });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
       const r = await fetch(url, {
         signal: ctrl.signal,
         headers: { 'User-Agent': 'W0PIUMBot/1.0 (link preview)' }
       });
-      clearTimeout(timer);
       if (!r.ok) return res.status(200).json({});
       const ct = r.headers.get('content-type') || '';
       if (!ct.includes('text/html')) return res.status(200).json({});
@@ -1915,6 +1941,8 @@ function main() {
     } catch (e) {
       logger.trace({ url, error: e.message }, 'link preview fetch failed');
       res.status(200).json({});
+    } finally {
+      clearTimeout(timer);
     }
   });
 
@@ -2263,7 +2291,7 @@ function main() {
     run('UPDATE conversation_members SET last_read=datetime(\'now\') WHERE conv_id=? AND user_id=?',[cid,req.uid]);
     const members=all('SELECT user_id FROM conversation_members WHERE conv_id=?',[cid]);
     const payload={ id,conv_id:cid,sender_id:req.uid,content:text||'',file,file_type:fileType,file_size:fileSize,file_name:fileName,reply_to,reply_text,created_at:new Date().toISOString(),reactions:[] };
-    members.forEach(row=>{ if (row.user_id!==req.uid) { notify(row.user_id,req.uid,'dm',cid); pushEvent(row.user_id,'message',payload); const memRow=get('SELECT muted_until FROM conversation_members WHERE conv_id=? AND user_id=?',[cid,row.user_id]); const isMuted=memRow?.muted_until&&new Date(memRow.muted_until)>new Date(); if (!isMuted) sendPush(row.user_id, `Новое сообщение`, payload.content ? payload.content.slice(0,80) : '📎 файл', '/'); } });
+    members.forEach(row=>{ if (row.user_id!==req.uid) { notify(row.user_id,req.uid,'dm',cid); pushEvent(row.user_id,'message',payload); const memRow=get('SELECT muted_until FROM conversation_members WHERE conv_id=? AND user_id=?',[cid,row.user_id]); const isMuted=memRow?.muted_until&&new Date(memRow.muted_until)>new Date(); if (!isMuted) sendPush(row.user_id, `Новое сообщение`, payload.content ? payload.content.slice(0,80) : '📎 файл', '/').catch(err => logger.trace({ error: err.message }, 'sendPush failed')); } });
     // Detect @mentions and notify mentioned users
     const mentionMatches=(text||'').match(/@([a-z0-9_]+)/gi)||[];
     const mentionedUsernames=[...new Set(mentionMatches.map(m=>m.slice(1).toLowerCase()))];
@@ -2273,7 +2301,7 @@ function main() {
         if (mentioned&&mentioned.id!==req.uid) {
           if (get('SELECT 1 FROM conversation_members WHERE conv_id=? AND user_id=?',[cid,mentioned.id])) {
             pushEvent(mentioned.id,'mention',{conv_id:cid,msg_id:id,from_id:req.uid});
-            sendPush(mentioned.id,`Упоминание`,`@${uname}: ${(text||'').slice(0,60)}`,'/');}
+            sendPush(mentioned.id,`Упоминание`,`@${uname}: ${(text||'').slice(0,60)}`,'/').catch(err => logger.trace({ error: err.message }, 'sendPush mention failed'));}
         }
       });
     }
@@ -2892,7 +2920,8 @@ function main() {
   });
 
   app.get('/api/admin/jobs', adminAuth, (req, res) => {
-    const limit = Math.min(80, Math.max(10, parseInt(req.query.limit, 10) || 40));
+    const raw = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(raw) ? Math.min(80, Math.max(10, raw)) : 40;
     const rows = all(`SELECT id,type,status,attempts,max_attempts,created_at,updated_at,run_after,substr(error,1,200) AS error_short,substr(result,1,120) AS result_short FROM background_jobs ORDER BY created_at DESC LIMIT ?`, [limit]);
     res.json({ jobs: rows });
   });
@@ -3229,9 +3258,13 @@ function main() {
 
   setInterval(() => {
     try {
-      const due = all(`SELECT p.id, p.user_id FROM posts p WHERE p.scheduled_at IS NOT NULL AND datetime(p.scheduled_at) <= datetime('now') AND p.archived=0 LIMIT 500`);
+      const due = db.transaction(() => {
+        const rows = all(`SELECT p.id, p.user_id FROM posts p WHERE p.scheduled_at IS NOT NULL AND datetime(p.scheduled_at) <= datetime('now') AND p.archived=0 LIMIT 500`);
+        if (!rows.length) return [];
+        run(`UPDATE posts SET scheduled_at=NULL WHERE id IN (${rows.map(() => '?').join(',')})`, rows.map(p => p.id));
+        return rows;
+      })();
       if (!due.length) return;
-      run(`UPDATE posts SET scheduled_at=NULL WHERE id IN (${due.map(() => '?').join(',')})`, due.map(p => p.id));
       const userIds = [...new Set(due.map(p => p.user_id))];
       userIds.forEach(uid => pushEvent(uid, 'post_published', { count: due.filter(p => p.user_id === uid).length }));
       if (due.length >= 500) logger.warn({ count: due.length }, 'scheduled post batch hit 500 limit — may have overflow');
