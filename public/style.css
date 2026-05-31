@@ -2683,6 +2683,7 @@ img.ui-icon {
 
 /* ── SEARCH ── */
 .search-wrap { margin-bottom: 1.2rem; }
+.search-wrap .input { width: 100%; }
 
 /* ── ARTIST ROW ── */
 .artist-row {
@@ -4287,6 +4288,7 @@ img.ui-icon {
 
 /* ── SEARCH ── */
 .search-bar { margin-bottom: 0.75rem; }
+.search-bar .input { width: 100%; }
 .search-tabs {
   display: flex;
   flex-wrap: wrap;

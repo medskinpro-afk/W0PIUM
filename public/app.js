@@ -1438,7 +1438,7 @@ function prefetchPage(pageName, pageParam) {
 }
 
 // ── ROUTER ──
-function go(p, param, _hist = 'push') {
+async function go(p, param, _hist = 'push') {
   if (dirtySettings && page === 'settings' && p !== 'settings') {
     if (!confirm('Есть несохранённые изменения. Уйти без сохранения?')) return;
     dirtySettings = false;
