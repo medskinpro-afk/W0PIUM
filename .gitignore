@@ -44,9 +44,6 @@ Thumbs.db
 *.tmp
 *.swp
 
-# ➤ Файлы сидов/тестов
-seed-users.js
-
 # ➤ E2E test artifacts
 playwright-report/
 test-results/

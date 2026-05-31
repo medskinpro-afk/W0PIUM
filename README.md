@@ -238,4 +238,4 @@ node -e "const wp = require('web-push'); const k = wp.generateVAPIDKeys(); conso
 По вопросам проекта:
 
 - Владелец инстанса / администратор: **WF**
-- Технические изменения и деплой: через задачи в DSM + файлы `RUNBOOK.md` и `scripts/DSM-TASKS.md`
+- Технические изменения и деплой: через задачи в DSM + файл `scripts/DSM-TASKS.md`
