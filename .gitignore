@@ -22,6 +22,7 @@ docker-compose.override.yml
 .cursor/*
 !.cursor/rules/
 !.cursor/mcp.json
+!.cursor/hooks.json
 
 # ➤ Логи и синхронизация Synology
 logs.txt

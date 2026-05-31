@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "type": "prompt",
+        "prompt": "Block any command that would: delete or modify .env files, run git push --force, run rm -rf on any directory outside the workspace, or access/modify data/ directory contents. Allow everything else."
+      }
+    ]
+  }
+}
