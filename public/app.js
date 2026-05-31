@@ -736,7 +736,7 @@ function showTyping() {
       if (d.y < 0) d.y = H; else if (d.y > H) d.y = 0;
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,255,255,${d.a})`;
+      ctx.fillStyle = `rgba(138,43,255,${d.a * 1.3})`;
       ctx.fill();
       for (let j = i + 1; j < dots.length; j++) {
         const d2 = dots[j];
@@ -747,7 +747,7 @@ function showTyping() {
           ctx.beginPath();
           ctx.moveTo(d.x, d.y);
           ctx.lineTo(d2.x, d2.y);
-          ctx.strokeStyle = `rgba(255,255,255,${0.04 * t})`;
+          ctx.strokeStyle = `rgba(138,43,255,${0.06 * t})`;
           ctx.lineWidth = 0.5;
           ctx.stroke();
         }
