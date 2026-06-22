@@ -1,5 +1,5 @@
 // ── VERSION ──
-const APP_VERSION = '0.9.27';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.27';
 
 // ── IMAGE LIGHTBOX ──
 function openImg(src) {
@@ -329,11 +329,32 @@ function toggleTheme() {
   applyTheme(current === 'light' ? 'dark' : 'light');
   renderNav();
 }
-// Apply saved theme on load
+// Apply saved theme on load — system preference fallback
 (function() {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'light') {
+    document.documentElement.classList.add('light');
+  } else if (!saved) {
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+      document.documentElement.classList.add('light');
+    }
+  }
+})();
+// Listen for OS theme changes (when user hasnt picked manually)
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', e => {
+  if (!localStorage.getItem('theme')) {
+    document.documentElement.classList.toggle('light', e.matches);
+  }
+});
   const saved = localStorage.getItem('theme');
   if (saved === 'light') document.documentElement.classList.add('light');
 })();
+// Sync theme across tabs
+window.addEventListener('storage', e => {
+  if (e.key === 'theme') {
+    document.documentElement.classList.toggle('light', e.newValue === 'light');
+  }
+});
 
 // UX state
 let dirtySettings = false;
@@ -730,8 +751,10 @@ function showTyping() {
   const LINK_DIST2 = 110 * 110; // squared — avoids sqrt in hot loop
   let raf = null;
   let paused = false;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   function draw() {
+    if (reducedMotion.matches) return;
     if (paused) return;
     ctx.clearRect(0, 0, W, H);
     for (let i = 0; i < dots.length; i++) {
@@ -824,10 +847,9 @@ function showPwaHint() {
 
 // ── INIT ──
 async function init() {
-  // Suppress console.debug in non-dev environments
-  if (!location.hostname.startsWith('localhost') && !location.hostname.startsWith('127.0.0.1') && !location.hostname.startsWith('[::1]')) {
-    console.debug = () => {};
-  }
+  // Suppress console.debug in non-dev environments (check meta tag set by server)
+  const isDev = document.querySelector('meta[name="w0pium-env"]')?.content === 'development';
+  if (!isDev) { console.debug = () => {}; }
   document.querySelectorAll('.msg-menu-overlay').forEach(el => el.remove());
   closeMsgMenuPopover();
   initUiDelegates();
@@ -5288,6 +5310,7 @@ async function startRecording(cid) {
       const bufLen = analyser.frequencyBinCount;
       const dataArr = new Uint8Array(bufLen);
       function drawWave() {
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
         window._voiceWaveAnim = requestAnimationFrame(drawWave);
         analyser.getByteFrequencyData(dataArr);
         waveCtx.clearRect(0, 0, waveCanvas.width, waveCanvas.height);

@@ -36,39 +36,52 @@ if (IS_PROD) {
   }
 }
 
-// ── EMAIL ENCRYPTION (AES-256-GCM) ──
-// Key must be 32 bytes. In production ENCRYPTION_KEY is required (checked above).
-// In development a deterministic fallback is used for convenience only.
-const ENC_KEY = process.env.ENCRYPTION_KEY
+// ── KEY DERIVATION ──
+// ENCRYPTION_KEY is the master key (32 bytes hex). Three purpose-specific
+// sub-keys are derived via HMAC so that compromising one doesn't affect others.
+// Production requires ENCRYPTION_KEY (checked at startup above).
+// Dev falls back to a deterministic scrypt derivation.
+const _masterKey = process.env.ENCRYPTION_KEY
   ? Buffer.from(process.env.ENCRYPTION_KEY, 'hex')
   : crypto.scryptSync('w0pium-dev-key', 'salt', 32);
 
+function _deriveKey(purpose) {
+  return crypto.createHmac('sha256', _masterKey).update(purpose).digest();
+}
+
+const EMAIL_ENC_KEY  = _deriveKey('email-aes256-gcm');
+const EMAIL_HMAC_KEY = _deriveKey('email-hmac-sha256');
+const CSRF_HMAC_KEY  = _deriveKey('csrf-hmac-sha256');
+
+// ── EMAIL ENCRYPTION (AES-256-GCM) ──
 function encryptEmail(plain) {
   if (!plain) return '';
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', EMAIL_ENC_KEY, iv);
   const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return iv.toString('hex') + ':' + enc.toString('hex') + ':' + tag.toString('hex');
 }
 
 function decryptEmail(stored) {
-  if (!stored || !stored.includes(':')) return stored; // plaintext (legacy)
+  if (!stored || !stored.includes(':')) { logger.warn('decryptEmail: unencrypted email found, needs migration'); return null; } // plaintext (legacy)
   try {
     const [ivHex, encHex, tagHex] = stored.split(':');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, Buffer.from(ivHex, 'hex'));
+    const decipher = crypto.createDecipheriv('aes-256-gcm', EMAIL_ENC_KEY, Buffer.from(ivHex, 'hex'));
     decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
     return decipher.update(Buffer.from(encHex, 'hex')) + decipher.final('utf8');
   } catch (e) {
     logger.warn({ error: e.message, stored: stored.slice(0, 20) + '...' }, 'email decryption failed');
-    return stored; // fallback: return as-is if decryption fails
+    logger.error({ error: e.message }, 'decryptEmail: decryption failed, returning null'); return null; // fail closed
   }
 }
 function hashEmail(plain) {
-  return crypto.createHmac('sha256', ENC_KEY).update((plain||'').toLowerCase()).digest('hex');
+  return crypto.createHmac('sha256', EMAIL_HMAC_KEY).update((plain||'').toLowerCase()).digest('hex');
 }
 function makeCsrf(sessionToken) {
-  return crypto.createHmac('sha256', ENC_KEY).update(sessionToken || '').digest('hex').slice(0, 32);
+  // Include request time bucket (per 5-min window) to limit replay window
+  const bucket = Math.floor(Date.now() / 300000).toString();
+  return crypto.createHmac('sha256', CSRF_HMAC_KEY).update((sessionToken || '') + ':' + bucket).digest('hex').slice(0, 32);
 }
 
 // ── RATE LIMITERS ──
@@ -157,7 +170,14 @@ async function isSsrfBlocked(rawUrl) {
 }
 
 let db;
-function save() { /* better-sqlite3 writes directly to disk — no-op kept for SIGINT/SIGTERM compat */ }
+function save() {
+  // Flush WAL to main database file so no data is lost on container restart.
+  if (db) {
+    try { db.pragma('wal_checkpoint(RESTART)'); } catch (e) { logger.error({ error: e.message }, 'WAL checkpoint failed'); }
+    try { db.close(); } catch (e) { logger.error({ error: e.message }, 'db.close failed'); }
+  }
+  logger.info('Database checkpointed and closed');
+}
 function run(s, params = []) { return db.prepare(s).run(params); }
 function get(s, params = []) { return db.prepare(s).get(params) ?? null; }
 function all(s, params = []) { return db.prepare(s).all(params); }
@@ -428,7 +448,7 @@ function main() {
   if (process.env.BOOTSTRAP_ADMIN_USERNAME) {
     try {
       run('UPDATE users SET is_admin=1 WHERE username=?', [process.env.BOOTSTRAP_ADMIN_USERNAME]);
-      logger.warn(`bootstrap_admin: granted admin to ${process.env.BOOTSTRAP_ADMIN_USERNAME}`);
+      logger.warn('bootstrap_admin: granted admin to BOOTSTRAP_ADMIN_USERNAME');
     } catch (e) { logger.trace({ error: e.message }, 'bootstrap admin failed'); }
   }
 
@@ -448,6 +468,37 @@ function main() {
     'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
   ].forEach(s => { try { db.exec(s); } catch(e) { logger.warn('index: ' + e.message); } });
 
+  // ── SCHEMA VERSIONING ──
+  // All legacy migrations above are idempotent (try/catch).
+  // New migrations go into FUTURE_MIGRATIONS — applied exactly once, fatal on failure.
+  db.exec(`CREATE TABLE IF NOT EXISTS schema_version (
+    version    INTEGER PRIMARY KEY,
+    applied_at TEXT DEFAULT (datetime('now'))
+  )`);
+  // Baseline = number of legacy migrations already applied in all existing DBs.
+  const SCHEMA_BASELINE = 61;
+  db.prepare('INSERT OR IGNORE INTO schema_version (version) VALUES (?)').run(SCHEMA_BASELINE);
+
+  // Future numbered migrations (add new entries at the bottom, never reorder/delete):
+  const FUTURE_MIGRATIONS = [
+    // { version: 62, sql: `ALTER TABLE users ADD COLUMN foo TEXT DEFAULT ''` },
+  ];
+
+  {
+    const curV = (db.prepare('SELECT MAX(version) AS v FROM schema_version').get().v) || 0;
+    for (const m of FUTURE_MIGRATIONS) {
+      if (m.version <= curV) continue;
+      try {
+        db.exec(m.sql);
+        db.prepare('INSERT OR IGNORE INTO schema_version (version) VALUES (?)').run(m.version);
+        logger.info({ version: m.version }, 'schema migration applied');
+      } catch (e) {
+        logger.error({ version: m.version, sql: m.sql.slice(0, 80), error: e.message }, 'FATAL: schema migration failed');
+        process.exit(1);
+      }
+    }
+  }
+
   const app = express();
   app.set('trust proxy', 1);
   app.use(helmet({
@@ -456,8 +507,8 @@ function main() {
         defaultSrc: ["'self'"],
         scriptSrc:  ["'self'"],
         scriptSrcAttr: ["'unsafe-inline'"],
-        styleSrc:   ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-        fontSrc:    ["'self'", "https://fonts.gstatic.com"],
+        styleSrc:   ["'self'", "'unsafe-inline'"],
+        fontSrc:    ["'self'"],
         imgSrc:     ["'self'", "data:", "blob:"],
         mediaSrc:   ["'self'", "blob:"],
         connectSrc: ["'self'"],
@@ -495,6 +546,7 @@ function main() {
   app.use(express.static(p.join(__dirname, 'public'), {
     etag: false,
     lastModified: false,
+    index: false,  // index.html served dynamically below with version injection
   }));
   app.use('/icons_cut', express.static(p.join(__dirname, 'icons_cut')));
   app.use('/avatars',    express.static(AVA_DIR));
@@ -543,7 +595,7 @@ function main() {
     if (blocked.test(file.mimetype)) return cb(new Error('File type not allowed'));
     cb(null, true);
   };
-  const fileUp = multer({ dest: FILE_DIR, limits: { fileSize: 4*1024*1024*1024 }, fileFilter });
+  const fileUp = multer({ dest: FILE_DIR, limits: { fileSize: 256*1024*1024 }, fileFilter });
 
   function auth(req, res, next) {
     const t = req.cookies.token || req.headers['x-token'];
@@ -602,11 +654,14 @@ function main() {
   function notify(userId, fromId, type, refId) {
     if (userId === fromId) return;
     if (get('SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)', [userId,fromId,fromId,userId])) return;
-    run('INSERT INTO notifications (id,user_id,from_id,type,ref_id) VALUES(?,?,?,?,?)', [uuidv4(),userId,fromId,type,refId||'']);
     const fromU = get('SELECT display_name FROM users WHERE id=?', [fromId]);
     const name = fromU?.display_name || 'Кто-то';
     const msgs = { like:'лайкнул твой пост', comment:'прокомментировал твой пост', follow:'подписался на тебя', follow_request:'хочет подписаться на тебя', repost:'репостнул твой пост', dm:'написал тебе' };
-    if (msgs[type]) sendPush(userId, `W0PIUM · ${name}`, msgs[type], '/');
+    // Send push first — if it fails, we still insert the in-app notification
+    if (msgs[type]) {
+      try { sendPush(userId, `W0PIUM · ${name}`, msgs[type], '/'); } catch(e) { /* fire-and-forget, ignore sync errors */ }
+    }
+    run('INSERT INTO notifications (id,user_id,from_id,type,ref_id) VALUES(?,?,?,?,?)', [uuidv4(),userId,fromId,type,refId||'']);
   }
   function publicEsc(v='') {
     return String(v).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -829,7 +884,9 @@ function main() {
       if (password.length<8) return res.status(400).json({ error:'Пароль должен быть не менее 8 символов' });
       const hasLetter = /[a-zA-Zа-яА-Я]/.test(password);
       const hasDigit  = /[0-9]/.test(password);
+      const hasSpecial = /[^a-zA-Zа-яА-Я0-9]/.test(password);
       if (!hasLetter || !hasDigit) return res.status(400).json({ error: 'Пароль должен содержать буквы и цифры' });
+      if (password.length < 10 && !hasSpecial) return res.status(400).json({ error: 'Пароль должен быть не менее 10 символов или содержать спецсимволы' });
       if (INVITE_ONLY) {
         if (!invite_code) return res.status(400).json({ error:'Нужен инвайт-код' });
         const upper = invite_code.toUpperCase();
@@ -899,7 +956,8 @@ function main() {
     const tokenExp = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     run('UPDATE users SET email_token=?, email_token_exp=? WHERE id=?', [verifyToken, tokenExp, u.id]);
     try {
-      await sendEmail(decryptEmail(u.email), 'W0PIUM — новый код',
+      const userEmail = decryptEmail(u.email); if (!userEmail) { logger.error({ userId: u.id }, 'cannot send email — decryption failed'); return res.status(500).json({ error: 'Email encryption error' }); }
+      await sendEmail(userEmail, 'W0PIUM — новый код',
         `<p>Новый код: <strong style="font-size:24px;letter-spacing:4px">${verifyToken}</strong></p><p>Действует 15 минут.</p>`);
     } catch (e) { logger.warn({ error: e.message, user: u.id }, 'resend verification email failed'); }
     res.json({ ok:1 });
@@ -910,11 +968,14 @@ function main() {
     if (!email) return res.json({ ok:1 });
     const u = get('SELECT id,email,display_name,email_verified FROM users WHERE email_hash=?', [hashEmail(email)]);
     if (!u || !u.email_verified) return res.json({ ok:1 }); // don't leak existence
+    // Clear any previous reset token to prevent dangling tokens
+    run('UPDATE users SET reset_token=NULL, reset_token_exp=NULL WHERE id=? AND reset_token IS NOT NULL', [u.id]);
     const token = String(crypto.randomInt(100000, 1000000));
     const exp = new Date(Date.now() + 15*60*1000).toISOString();
     run('UPDATE users SET reset_token=?, reset_token_exp=? WHERE id=?', [token, exp, u.id]);
     try {
-      await sendEmail(decryptEmail(u.email), 'W0PIUM — сброс пароля',
+      const resetEmail = decryptEmail(u.email); if (!resetEmail) { logger.error({ userId: u.id }, 'cannot send reset email — decryption failed'); return res.status(500).json({ error: 'Email encryption error' }); }
+      await sendEmail(resetEmail, 'W0PIUM — сброс пароля',
         `<p>Твой код для сброса пароля: <strong style="font-size:24px;letter-spacing:4px">${token}</strong></p><p>Действует 15 минут.</p>`);
     } catch (e) { logger.warn({ error: e.message, user: u.id }, 'password reset email failed'); }
     res.json({ ok:1 });
@@ -972,7 +1033,7 @@ function main() {
 
   // PROFILE
   app.put('/api/profile', auth, limiterProfileUpdate, (req, res) => {
-    const safeLink = u => { const s=(u||'').trim(); return (s&&s.startsWith('https://'))?s:''; };
+    const safeLink = u => { const s=(u||'').trim(); if (!s) return ''; if (/^https:\/\//i.test(s)) return s; logger.warn({ url: s.replace(/[=@]/g,'_') }, 'safeLink rejected unsafe URL'); return ''; };
     const { display_name,bio,is_private,dm_requests,show_read_receipts,show_typing } = req.body;
     const link_sc=safeLink(req.body.link_sc), link_ig=safeLink(req.body.link_ig),
           link_tg=safeLink(req.body.link_tg), link_spotify=safeLink(req.body.link_spotify),
@@ -1001,7 +1062,7 @@ function main() {
     run('DELETE FROM users WHERE id=?', [req.uid]);
     res.clearCookie('token'); res.json({ ok:1 });
   });
-  app.post('/api/invite/rotate', auth, (req, res) => {
+  app.post('/api/invite/rotate', auth, limiterProfileUpdate, (req, res) => {
     const code = genCode();
     run('UPDATE users SET invite_code=? WHERE id=?', [code, req.uid]);
     res.json({ ok:1, invite_code: code });
@@ -1149,24 +1210,24 @@ function main() {
     }
     res.json({ ok:1, id });
   });
-  app.delete('/api/posts/:id', auth, (req, res) => {
+  app.delete('/api/posts/:id', auth, limiterPosts, (req, res) => {
     run('UPDATE users SET pinned_post_id=NULL WHERE id=? AND pinned_post_id=?',[req.uid,req.params.id]);
     run('DELETE FROM posts WHERE id=? AND user_id=?',[req.params.id,req.uid]); res.json({ ok:1 });
   });
 
-  app.post('/api/posts/:id/pin', auth, (req, res) => {
+  app.post('/api/posts/:id/pin', auth, limiterPostReact, (req, res) => {
     const post = get('SELECT id FROM posts WHERE id=? AND user_id=?',[req.params.id,req.uid]);
     if (!post) return res.status(404).json({ error:'Not found' });
     run('UPDATE users SET pinned_post_id=? WHERE id=?',[req.params.id,req.uid]);
     res.json({ ok:1 });
   });
-  app.delete('/api/posts/:id/pin', auth, (req, res) => {
+  app.delete('/api/posts/:id/pin', auth, limiterPostReact, (req, res) => {
     run('UPDATE users SET pinned_post_id=NULL WHERE id=? AND pinned_post_id=?',[req.uid,req.params.id]);
     res.json({ ok:1 });
   });
 
   // ARCHIVE
-  app.post('/api/posts/:id/archive', auth, (req, res) => {
+  app.post('/api/posts/:id/archive', auth, limiterPostReact, (req, res) => {
     const post=get('SELECT id FROM posts WHERE id=? AND user_id=?',[req.params.id,req.uid]);
     if (!post) return res.status(404).json({ error:'Not found' });
     run('UPDATE posts SET archived=1 WHERE id=?',[req.params.id]);
@@ -1174,19 +1235,19 @@ function main() {
     run('UPDATE users SET pinned_post_id=NULL WHERE id=? AND pinned_post_id=?',[req.uid,req.params.id]);
     res.json({ ok:1 });
   });
-  app.delete('/api/posts/:id/archive', auth, (req, res) => {
+  app.delete('/api/posts/:id/archive', auth, limiterPostReact, (req, res) => {
     run('UPDATE posts SET archived=0 WHERE id=? AND user_id=?',[req.params.id,req.uid]);
     res.json({ ok:1 });
   });
 
   // PLAY COUNT
-  app.post('/api/posts/:id/play', limiterPlay, (req, res) => {
+  app.post('/api/posts/:id/play', auth, limiterPlay, (req, res) => {
     run('UPDATE posts SET play_count=play_count+1 WHERE id=?',[req.params.id]);
     res.json({ ok:1 });
   });
 
   // POLL VOTE
-  app.post('/api/posts/:id/poll/:optId', auth, (req, res) => {
+  app.post('/api/posts/:id/poll/:optId', auth, limiterPostReact, (req, res) => {
     const poll=get('SELECT id FROM polls WHERE post_id=?',[req.params.id]);
     if (!poll) return res.status(404).json({ error:'Not found' });
     const opt=get('SELECT id FROM poll_options WHERE id=? AND poll_id=?',[req.params.optId,poll.id]);
@@ -1633,7 +1694,7 @@ function main() {
     reactions.forEach(r => { r.me = myReacts.has(r.emoji); });
     res.json({ ok: 1, reactions });
   });
-  app.delete('/api/posts/:id/react', auth, (req, res) => {
+  app.delete('/api/posts/:id/react', auth, limiterPostReact, (req, res) => {
     run('DELETE FROM post_reactions WHERE post_id=? AND user_id=?', [req.params.id, req.uid]);
     const reactions = all('SELECT emoji, COUNT(*) AS count FROM post_reactions WHERE post_id=? GROUP BY emoji', [req.params.id]);
     reactions.forEach(r => { r.me = false; });
@@ -1641,7 +1702,7 @@ function main() {
   });
 
   // BOOKMARKS
-  app.post('/api/posts/:id/bookmark', auth, (req, res) => {
+  app.post('/api/posts/:id/bookmark', auth, limiterPostReact, (req, res) => {
     const has = get('SELECT 1 FROM bookmarks WHERE user_id=? AND post_id=?', [req.uid, req.params.id]);
     if (has) {
       run('DELETE FROM bookmarks WHERE user_id=? AND post_id=?', [req.uid, req.params.id]);
@@ -1671,7 +1732,7 @@ function main() {
   });
 
   // EDIT POST
-  app.put('/api/posts/:id', auth, (req, res) => {
+  app.put('/api/posts/:id', auth, limiterPosts, (req, res) => {
     const po = get('SELECT id,user_id,created_at FROM posts WHERE id=?', [req.params.id]);
     if (!po) return res.status(404).json({ error: 'Пост не найден' });
     if (po.user_id !== req.uid) return res.status(403).json({ error: 'Нет прав' });
@@ -1685,7 +1746,7 @@ function main() {
     res.json({ ok: 1, content });
   });
 
-  app.patch('/api/posts/:id', auth, (req,res) => {
+  app.patch('/api/posts/:id', auth, limiterPosts, (req,res) => {
     const post = get('SELECT id,user_id,created_at FROM posts WHERE id=?', [req.params.id]);
     if (!post) return res.status(404).json({error:'not found'});
     if (post.user_id !== req.uid) return res.status(403).json({error:'forbidden'});
@@ -1971,12 +2032,12 @@ function main() {
     run('INSERT INTO drops (id,user_id,content,track_url,image,expires_at) VALUES(?,?,?,?,?,datetime(\'now\',\'+24 hours\'))',[id,req.uid,content,track_url,image]);
     res.json({ ok:1, id });
   });
-  app.delete('/api/drops/:id', auth, (req, res) => {
+  app.delete('/api/drops/:id', auth, limiterDrops, (req, res) => {
     const d = get('SELECT image FROM drops WHERE id=? AND user_id=?', [req.params.id, req.uid]);
     if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch (e) { logger.trace({ image: d.image, error: e.message }, 'failed to delete user drop image'); }
     run('DELETE FROM drops WHERE id=? AND user_id=?',[req.params.id,req.uid]); res.json({ ok:1 });
   });
-  app.post('/api/drops/:id/view', auth, (req, res) => {
+  app.post('/api/drops/:id/view', auth, limiterDrops, (req, res) => {
     const drop = get('SELECT user_id FROM drops WHERE id=?',[req.params.id]);
     if (drop && drop.user_id !== req.uid) {
       try { run('INSERT INTO drop_views (drop_id,user_id) VALUES(?,?)',[req.params.id,req.uid]); } catch (e) { logger.trace({ drop_id: req.params.id, error: e.message }, 'failed to record drop view'); }
@@ -1989,7 +2050,7 @@ function main() {
     res.json({ code: ensureInviteCode(req.uid), invite_only: INVITE_ONLY });
   });
   // CHATS
-  app.post('/api/chats', auth, (req, res) => {
+  app.post('/api/chats', auth, limiterMsg, (req, res) => {
     const uid=req.uid, { target_id,members,title }=req.body||{};
     if (target_id) {
       if (target_id===uid) return res.status(400).json({ error:'no' });
@@ -2014,7 +2075,7 @@ function main() {
     mems.forEach(id=>{ if (id!==uid) { notify(id,uid,'dm',convId); pushEvent(id,'chat_invite',{id:convId,title:groupName}); } });
     res.json({ id:convId });
   });
-  app.post('/api/chats/start/:id', auth, (req, res) => {
+  app.post('/api/chats/start/:id', auth, limiterMsg, (req, res) => {
     const targetId=req.params.id;
     if (!targetId||targetId===req.uid) return res.status(400).json({ error:'no' });
     const blocked=get('SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)',[req.uid,targetId,targetId,req.uid]);
@@ -2032,7 +2093,7 @@ function main() {
     }
     res.json({ id:convId });
   });
-  app.post('/api/chats/:cid/accept', auth, (req, res) => {
+  app.post('/api/chats/:cid/accept', auth, limiterMsg, (req, res) => {
     const cid=req.params.cid;
     const row=get('SELECT accepted FROM conversation_members WHERE conv_id=? AND user_id=?',[cid,req.uid]);
     if (!row) return res.status(403).json({ error:'forbidden' });
@@ -2042,7 +2103,7 @@ function main() {
     other.forEach(m=>pushEvent(m.user_id,'dm_accepted',{conv_id:cid}));
     res.json({ ok:true });
   });
-  app.post('/api/chats/:cid/decline', auth, (req, res) => {
+  app.post('/api/chats/:cid/decline', auth, limiterMsg, (req, res) => {
     const cid=req.params.cid;
     if (!get('SELECT 1 AS x FROM conversation_members WHERE conv_id=? AND user_id=?',[cid,req.uid])) return res.status(403).json({ error:'forbidden' });
     // delete conversation entirely
@@ -2053,7 +2114,7 @@ function main() {
   });
 
   // GROUP MEMBER MANAGEMENT
-  app.post('/api/chats/:cid/members', auth, (req, res) => {
+  app.post('/api/chats/:cid/members', auth, limiterMsg, (req, res) => {
     const cid = req.params.cid;
     const conv = get('SELECT owner,is_group FROM conversations WHERE id=?', [cid]);
     if (!conv || !conv.is_group) return res.status(404).json({ error:'not found' });
@@ -2068,7 +2129,7 @@ function main() {
     pushEvent(userId, 'chat_invite', { id:cid });
     res.json({ ok:1 });
   });
-  app.delete('/api/chats/:cid/members/:uid', auth, (req, res) => {
+  app.delete('/api/chats/:cid/members/:uid', auth, limiterMsg, (req, res) => {
     const { cid, uid } = req.params;
     const conv = get('SELECT owner FROM conversations WHERE id=?', [cid]);
     if (!conv) return res.status(404).json({ error:'not found' });
@@ -2080,7 +2141,7 @@ function main() {
     pushEvent(uid, 'chat_removed', { conv_id:cid });
     res.json({ ok:1 });
   });
-  app.post('/api/chats/:cid/leave', auth, (req, res) => {
+  app.post('/api/chats/:cid/leave', auth, limiterMsg, (req, res) => {
     const cid = req.params.cid;
     const conv = get('SELECT owner,is_group FROM conversations WHERE id=?', [cid]);
     if (!conv || !conv.is_group) return res.status(404).json({ error:'not found' });
@@ -2100,7 +2161,7 @@ function main() {
   });
 
   // Edit group title
-  app.patch('/api/chats/:cid', auth, (req, res) => {
+  app.patch('/api/chats/:cid', auth, limiterMsg, (req, res) => {
     const cid = req.params.cid;
     const conv = get('SELECT owner, is_group FROM conversations WHERE id=?', [cid]);
     if (!conv || !conv.is_group) return res.status(404).json({ error: 'not found' });
@@ -2114,7 +2175,7 @@ function main() {
   });
 
   // Group avatar upload
-  app.post('/api/chats/:cid/avatar', auth, avaUp.single('avatar'), async (req, res) => {
+  app.post('/api/chats/:cid/avatar', auth, limiterMsg, avaUp.single('avatar'), async (req, res) => {
     const cid = req.params.cid;
     const conv = get('SELECT owner, is_group FROM conversations WHERE id=?', [cid]);
     if (!conv || !conv.is_group) return res.status(404).json({ error: 'not found' });
@@ -2158,7 +2219,7 @@ function main() {
     res.json(result);
   });
 
-  app.patch('/api/chats/:cid/state', auth, (req, res) => {
+  app.patch('/api/chats/:cid/state', auth, limiterMsg, (req, res) => {
     const cid = req.params.cid;
     if (!get('SELECT 1 FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]))
       return res.status(403).json({ error:'forbidden' });
@@ -2307,7 +2368,7 @@ function main() {
     }
     res.json({ ok:1, id });
   });
-  app.put('/api/chats/:cid/messages/:mid', auth, (req, res) => {
+  app.put('/api/chats/:cid/messages/:mid', auth, limiterMsg, (req, res) => {
     const { cid,mid }=req.params, newText=(req.body.content||'').trim();
     if (!newText) return res.status(400).json({ error:'empty' });
     const msg=get('SELECT sender_id FROM messages WHERE id=? AND conv_id=?',[mid,cid]);
@@ -2317,7 +2378,7 @@ function main() {
     all('SELECT user_id FROM conversation_members WHERE conv_id=?',[cid]).forEach(r=>pushEvent(r.user_id,'edit',payload));
     res.json({ ok:1 });
   });
-  app.delete('/api/chats/:cid/messages/:mid', auth, (req, res) => {
+  app.delete('/api/chats/:cid/messages/:mid', auth, limiterMsg, (req, res) => {
     const { cid,mid }=req.params;
     const msg=get('SELECT sender_id FROM messages WHERE id=? AND conv_id=?',[mid,cid]);
     if (!msg||msg.sender_id!==req.uid) return res.status(403).json({ error:'forbidden' });
@@ -2349,7 +2410,7 @@ function main() {
     res.json({ ok: 1, id });
   });
 
-  app.post('/api/chats/:cid/pin', auth, (req, res) => {
+  app.post('/api/chats/:cid/pin', auth, limiterMsg, (req, res) => {
     const cid = req.params.cid;
     const conv = get('SELECT owner, is_group FROM conversations WHERE id=?', [cid]);
     if (!conv) return res.status(404).json({ error: 'not found' });
@@ -2367,7 +2428,7 @@ function main() {
     res.json({ ok: 1 });
   });
 
-  app.delete('/api/chats/:cid/pin', auth, (req, res) => {
+  app.delete('/api/chats/:cid/pin', auth, limiterMsg, (req, res) => {
     const cid = req.params.cid;
     const conv = get('SELECT owner, is_group FROM conversations WHERE id=?', [cid]);
     if (!conv) return res.status(404).json({ error: 'not found' });
@@ -2378,7 +2439,7 @@ function main() {
     res.json({ ok: 1 });
   });
 
-  app.patch('/api/chats/:cid/mute', auth, (req, res) => {
+  app.patch('/api/chats/:cid/mute', auth, limiterMsg, (req, res) => {
     const cid = req.params.cid;
     if (!get('SELECT 1 FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]))
       return res.status(403).json({ error: 'forbidden' });
@@ -2410,7 +2471,7 @@ function main() {
     all('SELECT user_id FROM conversation_members WHERE conv_id=?',[cid]).forEach(r=>pushEvent(r.user_id,'reaction',{msg_id:mid,conv_id:cid,reactions}));
     res.json({ ok:1, reactions });
   });
-  app.delete('/api/chats/:cid/messages/:mid/react', auth, (req, res) => {
+  app.delete('/api/chats/:cid/messages/:mid/react', auth, limiterReact, (req, res) => {
     const { cid,mid }=req.params;
     run('DELETE FROM message_reactions WHERE msg_id=? AND user_id=?',[mid,req.uid]);
     const reactions=enrichMessages([{ id: mid }], req.uid)[0].reactions;
@@ -2419,7 +2480,7 @@ function main() {
   });
 
   // ── BLOCKS ──
-  app.post('/api/chats/:cid/messages/:mid/save', auth, (req, res) => {
+  app.post('/api/chats/:cid/messages/:mid/save', auth, limiterMsg, (req, res) => {
     const { cid, mid } = req.params;
     if (!get('SELECT 1 FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]))
       return res.status(403).json({ error:'forbidden' });
@@ -2429,7 +2490,7 @@ function main() {
     res.json({ ok:1, saved:true });
   });
 
-  app.delete('/api/chats/:cid/messages/:mid/save', auth, (req, res) => {
+  app.delete('/api/chats/:cid/messages/:mid/save', auth, limiterMsg, (req, res) => {
     const { cid, mid } = req.params;
     if (!get('SELECT 1 FROM conversation_members WHERE conv_id=? AND user_id=?', [cid, req.uid]))
       return res.status(403).json({ error:'forbidden' });
@@ -2500,7 +2561,7 @@ function main() {
     res.json({ key: VAPID_PUBLIC });
   });
 
-  app.post('/api/push/subscribe', auth, (req, res) => {
+  app.post('/api/push/subscribe', auth, limiterSessionManage, (req, res) => {
     const { endpoint, keys } = req.body;
     if (!endpoint || !keys?.p256dh || !keys?.auth) return res.status(400).json({ error:'Неверные данные' });
     const existing = get('SELECT id FROM push_subscriptions WHERE endpoint=?', [endpoint]);
@@ -2514,7 +2575,7 @@ function main() {
     res.json({ ok:1 });
   });
 
-  app.delete('/api/push/subscribe', auth, (req, res) => {
+  app.delete('/api/push/subscribe', auth, limiterSessionManage, (req, res) => {
     const { endpoint } = req.body;
     if (endpoint) run('DELETE FROM push_subscriptions WHERE endpoint=? AND user_id=?', [endpoint, req.uid]);
     else run('DELETE FROM push_subscriptions WHERE user_id=?', [req.uid]);
@@ -2585,6 +2646,19 @@ function main() {
   const HUB_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
   async function fetchPlatformStats(platform, apiKey) {
+  const urls = {
+    vk: `https://api.vk.com/method/stats.get?group_id=${apiKey}&v=5.199`,
+    youtube: `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${apiKey}&key=${apiKey}`,
+    soundcloud: `https://api.soundcloud.com/users/${apiKey}?client_id=${apiKey}`,
+    x: `https://api.twitter.com/2/users/${apiKey}?user.fields=public_metrics`,
+    twitch: `https://api.twitch.tv/helix/users?id=${apiKey}`,
+    tiktok: `https://open.tiktokapis.com/v2/user/info/?fields=follower_count`,
+    instagram: `https://graph.instagram.com/me?fields=id,username&access_token=${apiKey}`
+  };
+  const url = urls[platform];
+  if (!url) return null;
+  // SSRF gate
+  try { await isSsrfBlocked(url); } catch (e) { logger.warn({ platform, url: url.slice(0,80) }, 'SSRF blocked hub fetch'); return null; }
     try {
       if (platform === 'vk') {
         const r = await fetch(`https://api.vk.com/method/users.get?user_ids=walfir_off&fields=followers_count&v=5.131${apiKey ? '&access_token=' + apiKey : ''}`);
@@ -2669,6 +2743,7 @@ function main() {
         result[platform] = { data: cached.data, cached: true, updated_at: new Date(cached.ts).toISOString() };
         return;
       }
+      // SSRF gate is handled inside fetchPlatformStats
       const data = await fetchPlatformStats(platform, keys[platform] || '');
       hubStatsCache[platform] = { data, ts: Date.now() };
       result[platform] = { data, cached: false, updated_at: new Date(hubStatsCache[platform].ts).toISOString() };
@@ -2683,7 +2758,7 @@ function main() {
     res.json(out);
   });
 
-  app.post('/api/hub/keys', adminAuth, (req, res) => {
+  app.post('/api/hub/keys', adminAuth, limiterAdminJobTest, (req, res) => {
     const { platform, api_key } = req.body;
     if (!platform) return res.status(400).json({ error: 'platform required' });
     run("INSERT INTO hub_api_keys (platform,api_key,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(platform) DO UPDATE SET api_key=excluded.api_key,updated_at=excluded.updated_at", [platform, api_key || '']);
@@ -2732,7 +2807,7 @@ function main() {
     res.json(list);
   });
 
-  app.post('/api/admin/users', adminAuth, (req, res) => {
+  app.post('/api/admin/users', adminAuth, limiterAdminJobTest, (req, res) => {
     const username = String(req.body.username || '').trim().toLowerCase();
     const displayName = String(req.body.display_name || username).trim();
     const password = String(req.body.password || '').trim();
@@ -2750,7 +2825,7 @@ function main() {
     res.json({ ok:1, id, username, password });
   });
 
-  app.post('/api/admin/users/:uid/password', adminAuth, (req, res) => {
+  app.post('/api/admin/users/:uid/password', adminAuth, limiterAdminJobTest, (req, res) => {
     const uid = req.params.uid;
     const u = get('SELECT id,username FROM users WHERE id=?', [uid]);
     if (!u) return res.status(404).json({ error:'Не найден' });
@@ -2761,13 +2836,13 @@ function main() {
     res.json({ ok:1, username:u.username, password });
   });
 
-  app.delete('/api/admin/users/:uid/sessions', adminAuth, (req, res) => {
+  app.delete('/api/admin/users/:uid/sessions', adminAuth, limiterAdminJobTest, (req, res) => {
     if (req.params.uid === req.uid) return res.status(400).json({ error:'Нельзя отозвать текущие сессии себя здесь' });
     const info = run('DELETE FROM sessions WHERE user_id=?', [req.params.uid]);
     res.json({ ok:1, revoked: info.changes || 0 });
   });
 
-  app.post('/api/admin/users/:uid/ban', adminAuth, (req, res) => {
+  app.post('/api/admin/users/:uid/ban', adminAuth, limiterAdminJobTest, (req, res) => {
     const uid = req.params.uid;
     if (uid === req.uid) return res.status(400).json({ error:'Нельзя забанить себя' });
     const u = get('SELECT banned_at,is_admin FROM users WHERE id=?', [uid]);
@@ -2784,7 +2859,7 @@ function main() {
     res.json({ ok:1, banned: !u.banned_at });
   });
 
-  app.delete('/api/admin/users/:uid', adminAuth, (req, res) => {
+  app.delete('/api/admin/users/:uid', adminAuth, limiterAdminJobTest, (req, res) => {
     const uid = req.params.uid;
     if (uid === req.uid) return res.status(400).json({ error:'Нельзя удалить себя' });
     const u = get('SELECT is_admin FROM users WHERE id=?', [uid]);
@@ -2796,7 +2871,7 @@ function main() {
     res.json({ ok:1 });
   });
 
-  app.post('/api/admin/users/:uid/promote', adminAuth, (req, res) => {
+  app.post('/api/admin/users/:uid/promote', adminAuth, limiterAdminJobTest, (req, res) => {
     const uid = req.params.uid;
     if (uid === req.uid) return res.status(400).json({ error:'Уже администратор' });
     const u = get('SELECT is_admin FROM users WHERE id=?', [uid]);
@@ -2812,14 +2887,14 @@ function main() {
     res.json(list);
   });
 
-  app.delete('/api/admin/drops/:id', adminAuth, (req, res) => {
+  app.delete('/api/admin/drops/:id', adminAuth, limiterAdminJobTest, (req, res) => {
     const d = get('SELECT image FROM drops WHERE id=?', [req.params.id]);
     if (d?.image) try { fs.unlinkSync(p.join(DATA, d.image.replace(/^\//, ''))); } catch (e) { logger.trace({ image: d.image, error: e.message }, 'failed to delete admin drop image'); }
     run('DELETE FROM drops WHERE id=?', [req.params.id]);
     res.json({ ok:1 });
   });
 
-  app.post('/api/admin/users/:uid/verify', adminAuth, (req, res) => {
+  app.post('/api/admin/users/:uid/verify', adminAuth, limiterAdminJobTest, (req, res) => {
     const u = get('SELECT is_verified FROM users WHERE id=?', [req.params.uid]);
     if (!u) return res.status(404).json({ error:'Не найден' });
     const badge_type = (req.body.badge_type || '').trim().toUpperCase().slice(0, 20);
@@ -2848,7 +2923,7 @@ function main() {
     res.json(list);
   });
 
-  app.post('/api/admin/verify-requests/:id/approve', adminAuth, (req, res) => {
+  app.post('/api/admin/verify-requests/:id/approve', adminAuth, limiterAdminJobTest, (req, res) => {
     const vr = get('SELECT * FROM verification_requests WHERE id=?', [req.params.id]);
     if (!vr) return res.status(404).json({ error:'Не найдено' });
     run('UPDATE verification_requests SET status=? WHERE id=?', ['approved', vr.id]);
@@ -2857,7 +2932,7 @@ function main() {
     res.json({ ok:1 });
   });
 
-  app.post('/api/admin/verify-requests/:id/reject', adminAuth, (req, res) => {
+  app.post('/api/admin/verify-requests/:id/reject', adminAuth, limiterAdminJobTest, (req, res) => {
     const vr = get('SELECT * FROM verification_requests WHERE id=?', [req.params.id]);
     if (!vr) return res.status(404).json({ error:'Не найдено' });
     const reason = (req.body.reason || '').trim().slice(0, 200);
@@ -2872,7 +2947,7 @@ function main() {
       WHERE r.status='open' ORDER BY r.created_at DESC LIMIT 100`);
     res.json(list);
   });
-  app.post('/api/admin/reports/:id/resolve', adminAuth, (req, res) => {
+  app.post('/api/admin/reports/:id/resolve', adminAuth, limiterAdminJobTest, (req, res) => {
     run('UPDATE reports SET status=? WHERE id=?',['resolved',req.params.id]);
     res.json({ ok:1 });
   });
@@ -2905,7 +2980,7 @@ function main() {
       uptime_sec: Math.floor(process.uptime()),
       node: process.version,
       env: process.env.NODE_ENV || 'development',
-      build: 'bg-jobs-skeleton',
+      build: process.env.BUILD_ID || 'dev',
       req_id: req.id || null,
       memory: {
         rss: mem.rss,
@@ -2947,7 +3022,7 @@ function main() {
     '.bsl','.erf','.epf','.dt']);
   const diskUp = multer({
     dest: DISK_DIR,
-    limits: { fileSize: 4*1024*1024*1024 },
+    limits: { fileSize: 256*1024*1024 },
     fileFilter: (_req, file, cb) => {
       const ext = p.extname(file.originalname).toLowerCase();
       if (!DISK_ALLOWED_EXT.has(ext)) return cb(new Error('Недопустимый тип файла'));
@@ -2988,7 +3063,7 @@ function main() {
     res.json({ ok: 1, id });
   });
 
-  app.delete('/api/disk/:id', auth, (req, res) => {
+  app.delete('/api/disk/:id', auth, limiterFiles, (req, res) => {
     const f = get('SELECT user_id,path,preview_path FROM disk_files WHERE id=?', [req.params.id]);
     if (!f) return res.status(404).json({ error: 'Not found' });
     const u = get('SELECT is_admin FROM users WHERE id=?', [req.uid]);
@@ -3004,7 +3079,7 @@ function main() {
     res.json(r);
   });
 
-  app.patch('/api/disk/:id', auth, (req, res) => {
+  app.patch('/api/disk/:id', auth, limiterFiles, (req, res) => {
     const f = get('SELECT user_id FROM disk_files WHERE id=?', [req.params.id]);
     if (!f) return res.status(404).json({ error: 'Not found' });
     if (f.user_id !== req.uid) return res.status(403).json({ error: 'forbidden' });
@@ -3043,7 +3118,7 @@ function main() {
     res.json(folders);
   });
 
-  app.post('/api/disk/folders', auth, (req, res) => {
+  app.post('/api/disk/folders', auth, limiterFiles, (req, res) => {
     const name = (req.body.name || '').trim().slice(0, 100);
     if (!name) return res.status(400).json({ error: 'Нет имени' });
     const parentId = req.body.parent_id || null;
@@ -3056,7 +3131,7 @@ function main() {
     res.json({ ok: 1, id, name, parent_id: parentId, item_count: 0, created_at: new Date().toISOString() });
   });
 
-  app.patch('/api/disk/folders/:id', auth, (req, res) => {
+  app.patch('/api/disk/folders/:id', auth, limiterFiles, (req, res) => {
     const f = get('SELECT user_id FROM disk_folders WHERE id=?', [req.params.id]);
     if (!f) return res.status(404).json({ error: 'Not found' });
     if (f.user_id !== req.uid) return res.status(403).json({ error: 'forbidden' });
@@ -3066,7 +3141,7 @@ function main() {
     res.json({ ok: 1 });
   });
 
-  app.delete('/api/disk/folders/:id', auth, (req, res) => {
+  app.delete('/api/disk/folders/:id', auth, limiterFiles, (req, res) => {
     const f = get('SELECT user_id FROM disk_folders WHERE id=?', [req.params.id]);
     if (!f) return res.status(404).json({ error: 'Not found' });
     if (f.user_id !== req.uid) return res.status(403).json({ error: 'forbidden' });
@@ -3101,7 +3176,7 @@ function main() {
   });
 
   // ── DISK ZIP ──
-  app.post('/api/disk/zip', auth, (req, res) => {
+  app.post('/api/disk/zip', auth, limiterExport, (req, res) => {
     const ids = Array.isArray(req.body.ids) ? req.body.ids.slice(0, 50) : [];
     if (!ids.length) return res.status(400).json({ error: 'Нет файлов' });
     const files = ids.map(id => get('SELECT user_id,path,name FROM disk_files WHERE id=?', [id]))
@@ -3120,7 +3195,7 @@ function main() {
   });
 
   // ── PUBLIC LINKS ──
-  app.post('/api/disk/:id/publish', auth, (req, res) => {
+  app.post('/api/disk/:id/publish', auth, limiterFiles, (req, res) => {
     const f = get('SELECT user_id, public_token FROM disk_files WHERE id=?', [req.params.id]);
     if (!f) return res.status(404).json({ error: 'Not found' });
     if (f.user_id !== req.uid) return res.status(403).json({ error: 'forbidden' });
@@ -3129,7 +3204,7 @@ function main() {
     res.json({ ok: 1, token });
   });
 
-  app.delete('/api/disk/:id/publish', auth, (req, res) => {
+  app.delete('/api/disk/:id/publish', auth, limiterFiles, (req, res) => {
     const f = get('SELECT user_id FROM disk_files WHERE id=?', [req.params.id]);
     if (!f) return res.status(404).json({ error: 'Not found' });
     if (f.user_id !== req.uid) return res.status(403).json({ error: 'forbidden' });
@@ -3232,10 +3307,20 @@ function main() {
     });
   });
 
-  app.get('*', (req,res) => res.sendFile(p.join(__dirname,'public','index.html')));
+  // Serve index.html with dynamic APP_VERSION and NODE_ENV injection
+  const _indexHtml = (() => {
+    const raw = fs.readFileSync(p.join(__dirname, 'public', 'index.html'), 'utf-8');
+    const injected = raw.replace('__APP_VERSION__', APP_VERSION).replace('__NODE_ENV__', process.env.NODE_ENV || 'development');
+    // Cache until next restart (APP_VERSION only changes on deploy)
+    return injected;
+  })();
+  app.get('*', (req, res) => {
+    res.type('html').send(_indexHtml);
+  });
   // Global error handler — never expose stack traces to clients
   app.use((err, req, res, _next) => {
-    RECENT_ERRORS.push({
+    if (RECENT_ERRORS.length >= MAX_RECENT_ERRORS) RECENT_ERRORS.shift();
+      RECENT_ERRORS.push({
       at: new Date().toISOString(),
       req_id: req.id || null,
       path: req.path,
@@ -3250,13 +3335,18 @@ function main() {
       req_id: req.id || null
     });
   });
-  process.on('SIGINT',  ()=>{ save(); process.exit(0); });
-  process.on('SIGTERM', ()=>{ save(); process.exit(0); });
+  function clearAllIntervals() {
+  if (bgJobInterval) clearInterval(bgJobInterval);
+  if (cleanupInterval) clearInterval(cleanupInterval);
+}
+
+process.on('SIGINT', () => { clearAllIntervals(); save(); setTimeout(() => process.exit(0), 500); });
+  process.on('SIGTERM', () => { clearAllIntervals(); save(); setTimeout(() => process.exit(0), 500); });
   app.listen(PORT, '0.0.0.0', () => logger.info({ port: PORT }, 'W0pium started'));
 
-  setInterval(() => { backgroundWorkerTick().catch(e => logger.error(e, 'backgroundWorkerTick')); }, 2_500);
+  const bgJobInterval = setInterval(() => { backgroundWorkerTick().catch(e => logger.error(e, 'backgroundWorkerTick')); }, 2_500);
 
-  setInterval(() => {
+  const cleanupInterval = setInterval(() => {
     try {
       const due = db.transaction(() => {
         const rows = all(`SELECT p.id, p.user_id FROM posts p WHERE p.scheduled_at IS NOT NULL AND datetime(p.scheduled_at) <= datetime('now') AND p.archived=0 LIMIT 500`);

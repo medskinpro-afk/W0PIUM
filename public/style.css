@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=UnifrakturCook:wght@700&family=Space+Mono:wght@400;700&family=Syncopate:wght@400;700&family=Exo+2:wght@300;400;500;600;700&family=Tektur:wght@400;500;600;700&display=swap');
+
 
 /* Tailwind utilities — preflight disabled, base reset kept in :root below */
 @tailwind utilities;
@@ -212,6 +212,13 @@ nav {
   will-change: transform, filter, text-shadow;
   font-variant-numeric: slashed-zero;
   font-feature-settings: "zero" 1;
+}
+/* Respect user preference for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .logo-zero {
+    animation: none;
+    will-change: auto;
+  }
 }
 
 @keyframes zeroStretch {
