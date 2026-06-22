@@ -39,7 +39,7 @@ fi
 # ── Deploy ───────────────────────────────────────────────────────────────────
 if [ "$CHANGED_PACKAGES" = "true" ]; then
   echo "==> Full rebuild (package.json changed — expect ~2 min with pre-built binaries)"
-  docker compose up --build -d
+  docker compose --profile remote-tunnel up --build -d
 
 elif [ "$CHANGED_SERVER" = "true" ]; then
   echo "==> Fast deploy (server.js only)"
@@ -48,7 +48,7 @@ elif [ "$CHANGED_SERVER" = "true" ]; then
 
 else
   echo "==> Quick start (public/ or config — volume mount serves live files)"
-  docker compose up -d
+  docker compose --profile remote-tunnel up -d
 fi
 
 # ── Health check ─────────────────────────────────────────────────────────────
