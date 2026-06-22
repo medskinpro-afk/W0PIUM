@@ -1,6 +1,6 @@
 # HANDOVER — DeepSeek V4 Pro
 
-> **Дата обновления:** 22 июня 2026, 13:10
+> **Дата обновления:** 22 июня 2026, 13:30
 > **Проект:** W0PIUM — закрытая социальная сеть для артистов
 
 ---
@@ -15,58 +15,67 @@
 | Docker | `w0pium` (healthy) + `w0pium-cloudflared` (up) |
 | NAS | `192.168.129.149:5001`, логин `Walerca449` / `Mictico449!` |
 | GitHub | `https://github.com/medskinpro-afk/W0PIUM` |
-| Последний коммит | `64d8b59` — docs: architecture manifesto, API, design system, components, schema |
+| Последний коммит | `cf9a7e2` — BUILD_ID, health monitor, docker cleanup |
 
-## 2. ЧТО СДЕЛАНО (22 июня)
+## 2. ЧТО СДЕЛАНО (22 июня, сессия DeepSeek V4 Pro)
 
-### SSH настроен
-- `brew install openssh` — SSH работает
-- Команда: `sshpass -p 'Mictico449!' ssh Walerca449@192.168.129.149`
-- Docker требует `sudo`: `echo Mictico449! | sudo -S /usr/local/bin/docker ...`
+### Инфраструктура
+- **SSH**: `brew install openssh` — стабильный доступ к NAS
+- **Docker cleanup**: удалено 23 dangling-образа, освобождено ~1.6 GB. Чужие проекты (med-aesthetics, leadgen) не тронуты
+- **Git**: найден `/volume1/@appstore/Git/bin/git` (v2.39.1), добавлен в PATH
+- **BUILD_ID**: `docker-compose.yml` обновлён — health будет отдавать `"build":"0.9.27"` после редеплоя
 
-### Все фиксы задеплоены
-Вопреки предыдущему HANDOVER, все багфиксы уже в работающем контейнере:
-- MASTER_CODE — случайная генерация ✅
-- Rate limiters ✅
-- upgradeInsecureRequests: null ✅
-- Версия 0.9.27 ✅
+### Документация для AI-агентов (6 файлов, 1510 строк)
 
-### Скрипт деплоя исправлен
+| Файл | Что даёт |
+|---|---|
+| `schema.sql` | Полный DDL (28 таблиц, FK, индексы) — нет галлюцинаций полей |
+| `API.md` | 150+ эндпоинтов с auth, лимитерами, параметрами |
+| `ARCHITECTURE.md` | Стек, 9 жёстких табу, backend/frontend паттерны |
+| `design-system.md` | 2 палитры, типографика, радиусы, тени, easing-кривые |
+| `components.md` | Индекс 250+ функций app.js — никаких дубликатов |
+| `HANDOVER.md` | Этот файл |
+
+### Health-мониторинг
+- **Скрипт**: `scripts/monitor-health.sh` — проверяет локально + через Cloudflare
+  - 3 локальных фейла подряд → `docker restart w0pium` + `docker compose --profile remote-tunnel up -d`
+  - Локально ок, но Cloudflare недоступен → перезапуск только туннеля
+- **DSM-задача**: создать вручную через GUI (см. раздел 4)
+
+### Скрипт деплоя
 - `scripts/predeploy-and-deploy.sh` — `--profile remote-tunnel` во всех трёх путях
-- Запушен в GitHub (`2da474a`)
-
-### Создана документация для AI-агентов
-
-| Файл | Строк | Назначение |
-|---|---|---|
-| `schema.sql` | 324 | Полный DDL SQLite (28 таблиц, все колонки, FK, индексы) |
-| `API.md` | 352 | Все ~150 эндпоинтов с методами, auth, лимитерами, параметрами |
-| `ARCHITECTURE.md` | 178 | Стек, структура, backend/frontend паттерны, жёсткие табу |
-| `design-system.md` | 176 | Цвета (dark/light), типографика, отступы, радиусы, тени, анимации |
-| `components.md` | 480 | Индекс 250+ функций frontend (app.js) — рендеры, UI, чат, disk, voice |
-
-### MCP-серверы
-Уже настроены в `.cursor/mcp.json`:
-- **SQLite** (`mcp-sqlite` → `/Volumes/docker/w0pium/data/w0pium.db`) — работает при смонтированном SMB
-- **Playwright** — e2e/smoke тесты
-- **Docker** — управление контейнерами
-- **Filesystem** — доступ к файлам проекта
+- С git на NAS — "умный" деплой заработает (fast path для server.js)
 
 ## 3. DSM-ЗАДАЧИ
 
 | ID | Имя | Команда | Статус |
 |---|---|---|---|
 | 3 | Restart | `docker restart w0pium` | ✅ |
-| 5 | Backup DB | Бэкап БД | ✅ |
+| 5 | Backup DB | `scripts/backup-db.sh` | ⚠️ Верифицировать |
 | 6 | Logs | `docker logs w0pium --tail 200` | ✅ |
-| 10 | W0PIUM Auto Pipeline | `scripts/auto-pipeline.sh && docker compose --profile remote-tunnel up -d` | ✅ ИСПРАВЛЕН |
+| 10 | W0PIUM Auto Pipeline | `scripts/auto-pipeline.sh && docker compose --profile remote-tunnel up -d` | ✅ |
 | 11 | Fix cloudflared | `docker compose --profile remote-tunnel down && up -d` | ✅ |
+| **12** | **W0PIUM Health Monitor** | `cd /volume1/docker/w0pium && sh scripts/monitor-health.sh` | **🆕 СОЗДАТЬ** |
 
-DSM API для запуска задач (требует cookie-сессию):
+### Как создать задачу 12 (Health Monitor):
+
+1. Открыть `https://192.168.129.149:5001/`
+2. Main Menu → Control Panel → Task Scheduler
+3. Create → Scheduled Task → User-defined script
+4. General: Name=`W0PIUM Health Monitor`, User=`root`
+5. Schedule: Every 5 minutes, daily
+6. Task Settings: `cd /volume1/docker/w0pium && sh scripts/monitor-health.sh`
+7. OK (пароль: `Mictico449!`)
+
+### DSM API для запуска задач:
+
 ```
 POST https://192.168.129.149:5001/webapi/entry.cgi
+Content-Type: application/x-www-form-urlencoded
 Body: api=SYNO.Core.TaskScheduler&version=2&method=run&tasks=[{"id":11,"real_owner":"root"}]
 ```
+
+⚠️ Требует cookie-сессию. Если сессия истекла — перелогиниться через браузер.
 
 ## 4. КЛЮЧЕВЫЕ ЦИФРЫ
 
@@ -74,7 +83,8 @@ Body: api=SYNO.Core.TaskScheduler&version=2&method=run&tasks=[{"id":11,"real_own
 |---|---|
 | NAS RAM | 3.7 GB (доступно ~2.5 GB) |
 | Диск volume1 | 7.0 TB (занято 743 GB — 11%) |
-| Git на NAS | ❌ Не установлен |
+| W0PIUM образ | 265 MB |
+| Git | `/volume1/@appstore/Git/bin/git` v2.39.1 |
 | Node.js | 20 (в контейнере) |
 | SQLite | better-sqlite3 (sync) |
 | Фронтенд | Vanilla JS SPA (~8100 строк в app.js) |
@@ -82,18 +92,23 @@ Body: api=SYNO.Core.TaskScheduler&version=2&method=run&tasks=[{"id":11,"real_own
 
 ## 5. ЧТО ДЕЛАТЬ ДАЛЬШЕ
 
-### Мониторинг
-- Проверять `https://w0pium.walfir.com/api/health`
-- При Error 1033 → запустить DSM Task "Fix cloudflared" (ID 11) через SSH или DSM API
+### Сейчас (руками)
+1. **Создать DSM Task 12** (Health Monitor) — инструкция выше
+2. **Проверить бэкапы БД** — залогиниться на NAS, проверить файлы `data/w0pium.db.*.bak`, убедиться что есть свежие
+3. **Редеплоить** с `BUILD_ID` — запустить Auto Pipeline (ID 10) или:
+   ```bash
+   cd /volume1/docker/w0pium && docker compose --profile remote-tunnel up --build -d
+   ```
 
-### При смонтированном SMB
-- MCP SQLite заработает автоматически
-- Можно делать `docker cp` напрямую
+### При следующем падении
+- Health Monitor (ID 12) восстановит автоматически
+- Если нет — запустить "Fix cloudflared" (ID 11) через DSM GUI/API
+- Или через SSH: `docker compose --profile remote-tunnel down --remove-orphans && docker compose --profile remote-tunnel up -d`
 
-### Потенциальные улучшения
-- Установить git на NAS (`synopkg install Git`)
-- Выставить `BUILD_ID` в `.env` или `docker-compose.yml`
-- Настроить автоматический бэкап БД на внешний диск
+### Потенциально
+- Выставить `BUILD_ID` из git-коммита динамически (сейчас захардкожен `0.9.27`)
+- Настроить DSM-задачу «Clean Docker» раз в месяц (`docker image prune -f`)
+- SMB-шара: при монтировании MCP (SQLite/Filesystem) заработают автоматически
 
 ## 6. АККАУНТЫ
 
